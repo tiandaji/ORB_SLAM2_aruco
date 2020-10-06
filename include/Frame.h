@@ -29,6 +29,7 @@
 #include "ORBVocabulary.h"
 #include "KeyFrame.h"
 #include "ORBextractor.h"
+#include "MapAruco.h"
 
 #include <opencv2/opencv.hpp>
 #include "Thirdparty/aruco/aruco/aruco.h"
@@ -131,6 +132,8 @@ public:
 
     // Number of KeyPoints.
     int N;
+    //* Number of Arucos;
+    int NA;
 
     // Vector of keypoints (original for visualization) and undistorted (actually used by the system).
     // In the stereo case, mvKeysUn is redundant as images must be rectified.
@@ -142,6 +145,8 @@ public:
     // "Monocular" keypoints have a negative value.
     std::vector<float> mvuRight;
     std::vector<float> mvDepth;
+    //* Add by liujiamin
+    std::vector<std::vector<float> > mvuArucoRight;
 
     // Bag of Words Vector structures.
     DBoW2::BowVector mBowVec;
@@ -152,6 +157,8 @@ public:
 
     // MapPoints associated to keypoints, NULL pointer if no association.
     std::vector<MapPoint*> mvpMapPoints;
+    // Add by liujiamin
+    std::vector<MapAruco*> mvpMapArucos;
 
     // Flag to identify outlier associations.
     std::vector<bool> mvbOutlier;

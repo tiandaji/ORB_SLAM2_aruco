@@ -308,11 +308,12 @@ void Tracking::Track()
                 CheckReplacedInLastFrame();
 
                 // add TrackByAruco() !!! 这里忽略了很多条件，首先假设第一二帧都有marker
-                if(!mCurrentFrame.mvMarkers.empty() && !mLastFrame.mvMarkers.empty())
-                {
-                    bOK = TrackByAruco();
-                }
-                else if(mVelocity.empty() || mCurrentFrame.mnId<mnLastRelocFrameId+2)
+                // if(!mCurrentFrame.mvMarkers.empty() && !mLastFrame.mvMarkers.empty())
+                // {
+                //     bOK = TrackByAruco();
+                // }
+                // else 
+                if(mVelocity.empty() || mCurrentFrame.mnId<mnLastRelocFrameId+2)
                 {
                     bOK = TrackReferenceKeyFrame();
                 }
@@ -547,6 +548,37 @@ void Tracking::StereoInitialization()
 
         cout << "New map created with " << mpMap->MapPointsInMap() << " points" << endl;
 
+        // TODO: Create MapAruco and associate to KeyFrame
+        // Add by liujiamin
+        cout<<"In StereoInitialization...\nNow is creating MapAruco and associate to KeyFrame"<<endl;
+        for(size_t i=0; i<mCurrentFrame.mvMarkers.size(); i++)
+        {
+            cout<<"this is the num: " <<i<<" Marker"<<endl;
+            float s=0.18; //aruco length
+            aruco::Marker xM = mCurrentFrame.mvMarkers[i];
+            cout<<"\t" <<xM.id<<endl;
+            MapAruco* pNewMA = new MapAruco(xM, pKFini, mpMap, s);
+            // 此处应该给一个R单位矩阵和t零向量，给pNewMA->SetRTwm
+            pNewMA->SetRtwm(cv::Mat::eye(3,3,CV_32F), cv::Mat::zeros(3,1,CV_32F) );
+            cv::Mat T_get = pNewMA->GetTwm();
+            cout<<"T_get = \n"<<T_get<<endl;
+
+            pNewMA->AddObservation(pKFini, i);
+            pKFini->AddMapAruco(pNewMA, i);  //pKFini
+            mpMap->AddMapAruco(pNewMA);
+
+            // CheckArucoID(mCurrentFrame, pNewMA, i);
+            mCurrentFrame.mvpMapArucos[i]=pNewMA;
+        }
+
+        vector<MapAruco*> vpMA = mpMap->GetAllMapArucos();
+        for(size_t k=0; k<vpMA.size(); k++)
+        {
+            MapAruco* pMA = vpMA[k];
+            cout<<"Aruco id: "<<pMA->GetMapArucoID()<<endl;
+        }
+
+
         mpLocalMapper->InsertKeyFrame(pKFini);
 
         mLastFrame = Frame(mCurrentFrame);
@@ -761,6 +793,26 @@ void Tracking::CheckReplacedInLastFrame()
     }
 }
 
+// 给TrackReferenceKeyFrame中的F->mvpMapArucos[i]赋值
+void Tracking::CheckArucoID()
+{
+    vector<MapAruco*> vpMA = mpMap->GetAllMapArucos();
+    for(size_t k=0; k<vpMA.size(); k++)
+    {
+        MapAruco* pMA = vpMA[k];
+        int aid = pMA->GetMapArucoID();
+        for(size_t i=0; i<mCurrentFrame.mvMarkers.size(); i++)
+        {
+            int iid = mCurrentFrame.mvMarkers[i].id;
+            if(aid == iid)
+            {
+                cout<<"----iid:"<<endl<<"\t"<<iid<<endl;
+                mCurrentFrame.mvpMapArucos[i] = pMA;
+            }
+        }
+    }
+
+}
 
 bool Tracking::TrackReferenceKeyFrame()
 {
@@ -773,6 +825,10 @@ bool Tracking::TrackReferenceKeyFrame()
     vector<MapPoint*> vpMapPointMatches;
 
     int nmatches = matcher.SearchByBoW(mpReferenceKF,mCurrentFrame,vpMapPointMatches);
+
+    // Add by liujiamin
+    // TODO: make frame.mvpMapArucos[idx] have value
+    CheckArucoID();
 
     if(nmatches<15)
         return false;
@@ -891,6 +947,10 @@ bool Tracking::TrackWithMotionModel()
     else
         th=7;
     int nmatches = matcher.SearchByProjection(mCurrentFrame,mLastFrame,th,mSensor==System::MONOCULAR);
+
+    // Add by liujiamin
+    // TODO: make frame.mvpMapArucos[idx] have value
+    CheckArucoID();
 
     // If few matches, uses a wider window search
     if(nmatches<20)
@@ -1107,7 +1167,7 @@ bool Tracking::NeedNewKeyFrame()
     const bool c1a = mCurrentFrame.mnId>=mnLastKeyFrameId+mMaxFrames;
     // Condition 1b: More than "MinFrames" have passed and Local Mapping is idle
     const bool c1b = (mCurrentFrame.mnId>=mnLastKeyFrameId+mMinFrames && bLocalMappingIdle);
-    //Condition 1c: tracking is weak
+    // Condition 1c: tracking is weak
     const bool c1c =  mSensor!=System::MONOCULAR && (mnMatchesInliers<nRefMatches*0.25 || bNeedToInsertClose) ;
     // Condition 2: Few tracked points compared to reference keyframe. Lots of visual odometry compared to map matches.
     const bool c2 = ((mnMatchesInliers<nRefMatches*thRefRatio|| bNeedToInsertClose) && mnMatchesInliers>15);
@@ -1177,7 +1237,7 @@ void Tracking::CreateNewKeyFrame()
 
                 bool bCreateNew = false;
 
-                MapPoint* pMP = mCurrentFrame.mvpMapPoints[i];
+                MapPoint* pMP = mCurrentFrame.mvpMapPoints[i];  //类比此处，学习create new aruco 的方法
                 if(!pMP)
                     bCreateNew = true;
                 else if(pMP->Observations()<1)
@@ -1208,6 +1268,56 @@ void Tracking::CreateNewKeyFrame()
                     break;
             }
         }
+    }
+
+    //* it about adding Aruco to the map
+    // TODO: adding Aruco to the map
+    if(mSensor==System::STEREO)
+    {
+        cout<<"In CreateNewKeyFrame(), and now is adding new aruco to the map!"<<endl;
+        // mCurrentFrame 中的Aruco没加入到MapAruco中的要加入
+        // 所以需要判断Obervation是否<1
+        int na = mCurrentFrame.NA;
+        for(size_t i=0; i<na; i++)
+        {
+            bool bCreateNewMapAruco = false;
+            MapAruco* pMA = mCurrentFrame.mvpMapArucos[i];
+            if(!pMA) 
+            {
+                // 代表在KeyFrame中还没有为这个MapAruco赋东西
+                // 即没进行pKFini->AddMapAruco(pNewMA, i)这一步
+                cout<<"pMA is NULL"<<endl;
+                bCreateNewMapAruco = true;
+            }
+            else if(pMA->Observations()<1)
+            {
+                // 我看上面MapPoint有这一步骤，所以也加了
+                // 但是我感觉在我这是没用的，我应该会在每一步都加上Observation
+                cout<<"pMA->Observations() < 1"<<endl;
+                bCreateNewMapAruco = true;
+            }
+
+            aruco::Marker xM = mCurrentFrame.mvMarkers[i];
+            float s=0.18; //aruco length
+            if(bCreateNewMapAruco)
+            {
+                MapAruco* pNewMA = new MapAruco(xM, pKF, mpMap, s);
+                cv::Mat r=pKF->GetRotation().t();
+                cv::Mat t=pKF->GetCameraCenter();
+                cout<<r<<endl;
+                cout<<t<<endl;
+                pNewMA->SetRtwm(r, t);
+                cv::Mat T_get = pNewMA->GetTwm();
+                cout<<"T_get = "<<T_get<<endl;
+
+                pNewMA->AddObservation(pKF, i);
+                pKF->AddMapAruco(pNewMA, i);
+                mpMap->AddMapAruco(pNewMA);
+                cout<<"-----ckf-------New Aruco's ID: "<<xM.id<<endl;
+            }
+
+        }
+        cout<<"========END of adding Aruco to the map IN CreateNewKeyFrame============"<<endl;
     }
 
     mpLocalMapper->InsertKeyFrame(pKF);

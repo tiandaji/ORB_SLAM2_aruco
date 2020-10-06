@@ -361,6 +361,69 @@ int Optimizer::PoseOptimization(Frame *pFrame)
     }
 
 
+    //! 第一步错了
+    //! 还没加入关键帧的时候，尽管看到了该id号的二维码，也不能加入到优化内，所以不能以NAruco作为判断依据。
+    int NAruco=pFrame->NA;
+    int FailNum=0;
+    int NULLNum=0;
+    {
+    unique_lock<mutex> lock(MapAruco::mGlobalMutex);
+    cout<<"NAruco=\t"<<NAruco<<endl;
+    for(size_t i=0; i<NAruco; i++)
+    {
+        cout<<"In lock(MapAruco::mGlobalMutex),,,,,,,,,,"<<endl;
+        MapAruco* pMA = pFrame->mvpMapArucos[i];
+        if(pMA) //不为空，代表该ID号的Aruco已加入到MAP中
+        {
+            cout<<"pMA->ID=\t"<<pMA->GetMapArucoID()<<endl;
+            for(size_t j=0; j<4; j++)
+            {
+                nInitialCorrespondences++;
+
+                Eigen::Matrix<double,3,1> obs;
+                if(pFrame->mvuArucoRight[i][j]==-1)
+                {
+                    FailNum++;
+                    break;
+                }
+                obs<< pFrame->mvMarkers[i][j].x, pFrame->mvMarkers[i][j].y, pFrame->mvuArucoRight[i][j];
+                cout<<"obs: \n"<<obs<<endl;
+                g2o::EdgeStereoSE3ProjectXYZOnlyPose* e = new g2o::EdgeStereoSE3ProjectXYZOnlyPose();
+
+                e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(0)));
+                e->setMeasurement(obs);
+                const float weight = 10;//我自己设的
+                Eigen::Matrix3d Info = Eigen::Matrix3d::Identity()*weight;
+                e->setInformation(Info);
+
+                g2o::RobustKernelHuber *rk = new g2o::RobustKernelHuber;
+                e->setRobustKernel(rk);
+                rk->setDelta(deltaStereo);
+
+                e->fx=pFrame->fx;
+                e->fy=pFrame->fy;
+                e->cx=pFrame->cx;
+                e->cy=pFrame->cy;
+                e->bf=pFrame->mbf;
+                //此处要获得aruco每个角点的世界坐标。
+                cv::Mat Xw = pMA->GetPosInWorld(j);
+                e->Xw[0] = Xw.at<float>(0);
+                e->Xw[1] = Xw.at<float>(1);
+                e->Xw[2] = Xw.at<float>(2);
+                optimizer.addEdge(e);
+                vpEdgesStereo.push_back(e);
+                vnIndexEdgeStereo.push_back(N+4*(i-FailNum-NULLNum)+j);
+            }
+        }
+        else //为空，代表该ID号的Aruco还未因为关键帧加入到MAP中
+        {
+            NULLNum++;
+        }
+        
+    }
+    }
+
+
     if(nInitialCorrespondences<3)
         return 0;
 

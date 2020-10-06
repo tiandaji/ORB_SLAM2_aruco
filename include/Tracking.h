@@ -37,6 +37,7 @@
 #include "Initializer.h"
 #include "MapDrawer.h"
 #include "System.h"
+#include "MapAruco.h"
 
 #include <mutex>
 
@@ -49,6 +50,7 @@ class Map;
 class LocalMapping;
 class LoopClosing;
 class System;
+class Frame;
 
 class Tracking
 {  
@@ -74,6 +76,9 @@ public:
     // Use this function if you have deactivated local mapping and you only want to localize the camera.
     void InformOnlyTracking(const bool &flag);
 
+    // Add by liujiamin
+    // void CheckArucoID(Frame* F, MapAruco* MA, const size_t &idx);
+    void CheckArucoID();
 
 public:
 
@@ -114,6 +119,9 @@ public:
     bool mbOnlyTracking;
 
     void Reset();
+
+    // add by liujiamin
+    set<int> msiArucoDatabase;
 
 protected:
 

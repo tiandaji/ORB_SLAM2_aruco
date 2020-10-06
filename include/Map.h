@@ -23,6 +23,7 @@
 
 #include "MapPoint.h"
 #include "KeyFrame.h"
+#include "MapAruco.h"
 #include <set>
 
 #include <mutex>
@@ -34,6 +35,7 @@ namespace ORB_SLAM2
 
 class MapPoint;
 class KeyFrame;
+class MapAruco;
 
 class Map
 {
@@ -47,6 +49,10 @@ public:
     void SetReferenceMapPoints(const std::vector<MapPoint*> &vpMPs);
     void InformNewBigChange();
     int GetLastBigChangeIdx();
+
+    // add by liujiamin
+    void AddMapAruco(MapAruco* pMA);
+    std::vector<MapAruco*> GetAllMapArucos();
 
     std::vector<KeyFrame*> GetAllKeyFrames();
     std::vector<MapPoint*> GetAllMapPoints();
@@ -69,6 +75,9 @@ public:
 protected:
     std::set<MapPoint*> mspMapPoints;
     std::set<KeyFrame*> mspKeyFrames;
+
+    // add by liujiamin
+    std::set<MapAruco*> mspMapArucos;
 
     std::vector<MapPoint*> mvpReferenceMapPoints;
 

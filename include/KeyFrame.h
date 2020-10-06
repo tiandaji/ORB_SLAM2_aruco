@@ -28,6 +28,7 @@
 #include "ORBextractor.h"
 #include "Frame.h"
 #include "KeyFrameDatabase.h"
+#include "MapAruco.h"
 
 #include <mutex>
 
@@ -39,6 +40,7 @@ class Map;
 class MapPoint;
 class Frame;
 class KeyFrameDatabase;
+class MapAruco;
 
 class KeyFrame
 {
@@ -89,6 +91,10 @@ public:
     std::vector<MapPoint*> GetMapPointMatches();
     int TrackedMapPoints(const int &minObs);
     MapPoint* GetMapPoint(const size_t &idx);
+
+    // Add by liujiamin 
+    void AddMapAruco(MapAruco* pMA, const size_t &idx);
+    MapAruco* GetMapAruco(const size_t &idx);
 
     // KeyPoint functions
     std::vector<size_t> GetFeaturesInArea(const float &x, const float  &y, const float  &r) const;
@@ -164,6 +170,8 @@ public:
     const std::vector<cv::KeyPoint> mvKeysUn;
     const std::vector<float> mvuRight; // negative value for monocular points
     const std::vector<float> mvDepth; // negative value for monocular points
+    //* Add by liujiamin
+    std::vector<std::vector<float> > mvuArucoRight;
     const cv::Mat mDescriptors;
 
     //BoW
@@ -201,6 +209,9 @@ protected:
 
     // MapPoints associated to keypoints
     std::vector<MapPoint*> mvpMapPoints;
+
+    // Add by liujiamin
+    std::vector<MapAruco*> mvpMapArucos;
 
     // BoW
     KeyFrameDatabase* mpKeyFrameDB;

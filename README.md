@@ -1,7 +1,6 @@
 # Modified
 1. Add aruco in "Thirdparty"
-2. "frame.h": It can detect aruco.
-3. "Tracking.h": add TrackByAruco() to provide a pose to optimize. But now, it requires one same aruco between two frames.
+2. I try to add aruco to help localization. And it added in the function "Optimizer::PoseOptimization(&mCurrentFrame)". It works now, but there is very little help.
 
 =======================================================
 

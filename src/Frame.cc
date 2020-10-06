@@ -51,7 +51,8 @@ Frame::Frame(const Frame &frame)
      mfScaleFactor(frame.mfScaleFactor), mfLogScaleFactor(frame.mfLogScaleFactor),
      mvScaleFactors(frame.mvScaleFactors), mvInvScaleFactors(frame.mvInvScaleFactors),
      mvLevelSigma2(frame.mvLevelSigma2), mvInvLevelSigma2(frame.mvInvLevelSigma2),
-     mvMarkers(frame.mvMarkers)
+     mvMarkers(frame.mvMarkers),mvpMapArucos(frame.mvpMapArucos),NA(frame.NA), 
+     mvuArucoRight(frame.mvuArucoRight)
 {
     for(int i=0;i<FRAME_GRID_COLS;i++)
         for(int j=0; j<FRAME_GRID_ROWS; j++)
@@ -125,11 +126,51 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeSt
     aruco::MarkerDetector detector;
     detector.setDictionary("ARUCO_MIP_36h12");
     detector.detect(imLeft, mvMarkers, camera, 0.18);
-    // vector<aruco::Marker> vMarker = detector.detect(imLeft);
+    //! 右目也同样需要检测，因为需要得到mvuArucoRight
+    vector<aruco::Marker> vRMarker;
+    detector.detect(imRight, vRMarker, camera, 0.18);
+    int cou=0;
     for(auto m: mvMarkers){
-        cout<<m<<endl;
-        // aruco::CvDrawingUtils::draw3dAxis(imLeft, m, camera);
+        int mid = m.id;
+        bool HaveRight=false;
+
+        for(auto mR: vRMarker)
+        {
+            int mRid = mR.id;
+            if(mid == mRid)
+            {
+                std::vector<float> vARight;
+                vARight.push_back(mR[0].x);
+                vARight.push_back(mR[1].x);
+                vARight.push_back(mR[2].x);
+                vARight.push_back(mR[3].x);
+                mvuArucoRight.push_back(vARight);
+                HaveRight = true;
+            }
+        }
+
+        if(!HaveRight)
+        {
+            std::vector<float> vARight;
+            vARight.push_back(-1);
+            vARight.push_back(-1);
+            vARight.push_back(-1);
+            vARight.push_back(-1);
+            mvuArucoRight.push_back(vARight);
+        }
+
+        cout<<"m.id:\t"<<m.id<<endl;
+        cout<<m[0].x<<"\t"<<m[1].x<<"\t"<<m[2].x<<"\t"<<m[3].x<<"\t"<<endl;
+        cout<<mvuArucoRight[cou][0]<<"\t"<<mvuArucoRight[cou][1]<<"\t"<<mvuArucoRight[cou][2]<<"\t"<<mvuArucoRight[cou][3]<<"\t"<<endl;
+        cou++;
+        
     }
+
+    cout<<"=====END OF FRAME CONSTRUCTION========================="<<endl;
+
+    // TODO: Add mvpMapArucos
+    NA = mvMarkers.size();
+    mvpMapArucos = vector<MapAruco*>(NA,static_cast<MapAruco*>(NULL));
 }
 
 Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const double &timeStamp, ORBextractor* extractor,ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth)
@@ -184,6 +225,10 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const double &timeSt
     mb = mbf/fx;
 
     AssignFeaturesToGrid();
+
+    // TODO: Add mvpMapArucos
+    NA = 0;
+    mvpMapArucos = vector<MapAruco*>(NA,static_cast<MapAruco*>(NULL));
 }
 
 
@@ -241,6 +286,10 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extra
     mb = mbf/fx;
 
     AssignFeaturesToGrid();
+
+    // TODO: Add mvpMapArucos
+    NA = 0;
+    mvpMapArucos = vector<MapAruco*>(NA,static_cast<MapAruco*>(NULL));
 }
 
 void Frame::AssignFeaturesToGrid()

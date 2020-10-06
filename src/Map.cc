@@ -43,6 +43,14 @@ void Map::AddMapPoint(MapPoint *pMP)
     mspMapPoints.insert(pMP);
 }
 
+// Add by liujiamin
+void Map::AddMapAruco(MapAruco* pMA)
+{
+    unique_lock<mutex> lock(mMutexMap);
+    cout<<"Now is add MapAruco"<<endl;
+    mspMapArucos.insert(pMA);
+}
+
 void Map::EraseMapPoint(MapPoint *pMP)
 {
     unique_lock<mutex> lock(mMutexMap);
@@ -83,6 +91,13 @@ vector<KeyFrame*> Map::GetAllKeyFrames()
 {
     unique_lock<mutex> lock(mMutexMap);
     return vector<KeyFrame*>(mspKeyFrames.begin(),mspKeyFrames.end());
+}
+
+std::vector<MapAruco*> Map::GetAllMapArucos()
+{
+    unique_lock<mutex> lock(mMutexMap);
+    cout<<"in Map::GetAllMapArucos()"<<endl;
+    return vector<MapAruco*>(mspMapArucos.begin(),mspMapArucos.end());
 }
 
 vector<MapPoint*> Map::GetAllMapPoints()

@@ -41,7 +41,8 @@ KeyFrame::KeyFrame(Frame &F, Map *pMap, KeyFrameDatabase *pKFDB):
     mvInvLevelSigma2(F.mvInvLevelSigma2), mnMinX(F.mnMinX), mnMinY(F.mnMinY), mnMaxX(F.mnMaxX),
     mnMaxY(F.mnMaxY), mK(F.mK), mvpMapPoints(F.mvpMapPoints), mpKeyFrameDB(pKFDB),
     mpORBvocabulary(F.mpORBvocabulary), mbFirstConnection(true), mpParent(NULL), mbNotErase(false),
-    mbToBeErased(false), mbBad(false), mHalfBaseline(F.mb/2), mpMap(pMap)
+    mbToBeErased(false), mbBad(false), mHalfBaseline(F.mb/2), mpMap(pMap),
+    mvpMapArucos(F.mvpMapArucos), mvuArucoRight(F.mvuArucoRight)
 {
     mnId=nNextId++;
 
@@ -213,6 +214,15 @@ void KeyFrame::AddMapPoint(MapPoint *pMP, const size_t &idx)
     mvpMapPoints[idx]=pMP;
 }
 
+// Add by liujiamin
+void KeyFrame::AddMapAruco(MapAruco* pMA, const size_t &idx)
+{
+    unique_lock<mutex> lock(mMutexFeatures);
+    cout<<"in KeyFrame::AddMapAruco(MapAruco* pMA, const size_t &idx)"<<endl;
+    mvpMapArucos[idx]=pMA;
+    cout<<"\t"<<mvpMapArucos[idx]->GetMapArucoID()<<endl;
+}
+
 void KeyFrame::EraseMapPointMatch(const size_t &idx)
 {
     unique_lock<mutex> lock(mMutexFeatures);
@@ -284,6 +294,13 @@ MapPoint* KeyFrame::GetMapPoint(const size_t &idx)
 {
     unique_lock<mutex> lock(mMutexFeatures);
     return mvpMapPoints[idx];
+}
+
+// Add by liujiamin ----------
+MapAruco* KeyFrame::GetMapAruco(const size_t &idx)
+{
+    unique_lock<mutex> lock(mMutexFeatures);
+    return mvpMapArucos[idx];
 }
 
 void KeyFrame::UpdateConnections()
