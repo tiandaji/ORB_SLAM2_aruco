@@ -26,18 +26,21 @@ class MapAruco
 public:
     MapAruco(const aruco::Marker& pM, KeyFrame* pRefKF, Map* pMap, double length);
 
-    void SetRtwm(const cv::Mat &Rwc, const cv::Mat &twc);
+    void    SetRtwm(const cv::Mat &Rwc, const cv::Mat &twc);
     cv::Mat GetTwm();
-    void SetPosInWorld();
-    void AddObservation(KeyFrame* pKF,size_t idx);
-    int GetMapArucoID();
-    int Observations();
+    void    SetPosInWorld();
+    void    AddObservation(KeyFrame* pKF,size_t idx);
+    int     GetMapArucoID();
+    int     Observations();
     cv::Mat GetPosInWorld(const size_t & idx);
+    void    SetPosInWorld(const size_t & idx, const cv::Mat & p);
+    std::map<KeyFrame*, size_t> GetObservations();
 
 public:
     int nObs;
     long int mnFirstKFid;
     long int mnFirstFrame;
+    bool mbAddLocalBA; // 这个应该又不需要了
 
     static std::mutex mGlobalMutex;
 

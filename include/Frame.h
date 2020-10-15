@@ -196,7 +196,7 @@ public:
     static bool mbInitialComputations;
 
     //aruco
-    vector<aruco::Marker> mvMarkers;
+    std::vector<aruco::Marker> mvMarkers;
 
 private:
 

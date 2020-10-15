@@ -26,6 +26,7 @@
 #include "KeyFrame.h"
 #include "LoopClosing.h"
 #include "Frame.h"
+#include "MapAruco.h"
 
 #include "Thirdparty/g2o/g2o/types/types_seven_dof_expmap.h"
 

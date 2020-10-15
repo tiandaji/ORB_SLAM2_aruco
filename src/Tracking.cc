@@ -1072,8 +1072,11 @@ bool Tracking::TrackLocalMap()
 
     UpdateLocalMap();
 
-    SearchLocalPoints();
+    SearchLocalPoints();//在局部地图中查找在当前帧视野范围内的点，将视野范围内的点和当前帧的特征点进行投影匹配
 
+    //* 上两步是给mCurrentFrame.mvpMapPoints重新处理了一下
+    //* 此处再来一个PoseOptimization主要是调整MapPoint的
+    //* 所以可能上两个函数对Aruco的影响不大
     // Optimize Pose
     Optimizer::PoseOptimization(&mCurrentFrame);
     mnMatchesInliers = 0;
@@ -1270,7 +1273,7 @@ void Tracking::CreateNewKeyFrame()
         }
     }
 
-    //* it about adding Aruco to the map
+    //* it is about adding Aruco to the map
     // TODO: adding Aruco to the map
     if(mSensor==System::STEREO)
     {
@@ -1328,6 +1331,11 @@ void Tracking::CreateNewKeyFrame()
     mpLastKeyFrame = pKF;
 }
 
+/**
+ * @brief 对 Local MapPoints 进行跟踪
+ * 
+ * 在局部地图中查找在当前帧视野范围内的点，将视野范围内的点和当前帧的特征点进行投影匹配
+ */
 void Tracking::SearchLocalPoints()
 {
     // Do not search map points already matched

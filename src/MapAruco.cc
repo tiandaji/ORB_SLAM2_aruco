@@ -11,7 +11,7 @@ namespace ORB_SLAM2
 mutex MapAruco::mGlobalMutex;
 
 MapAruco::MapAruco(const aruco::Marker& pM, KeyFrame* pRefKF, Map* pMap, double length):
-nObs(0)
+nObs(0), mbAddLocalBA(false)
 {
     cout<<"It's in the constuction..."<<endl;
     mAruco = pM; // 此mAruco会保存他在当前帧上的像素位置
@@ -82,6 +82,12 @@ cv::Mat MapAruco::GetPosInWorld(const size_t & idx)
     return mvPosInWorld[idx];
 }
 
+void MapAruco::SetPosInWorld(const size_t & idx, const cv::Mat & p)
+{
+    unique_lock<mutex> lock(mMutexFeatures);
+    mvPosInWorld[idx] = p;
+}
+
 void MapAruco::AddObservation(KeyFrame* pKF,size_t idx)
 {
     unique_lock<mutex> lock(mMutexFeatures);
@@ -105,6 +111,12 @@ int MapAruco::Observations()
 {
     unique_lock<mutex> lock(mMutexFeatures);
     return nObs;
+}
+
+map<KeyFrame*, size_t> MapAruco::GetObservations()
+{
+    unique_lock<mutex> lock(mMutexFeatures);
+    return mObservations;
 }
 
 

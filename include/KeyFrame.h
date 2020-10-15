@@ -31,6 +31,8 @@
 #include "MapAruco.h"
 
 #include <mutex>
+#include <opencv2/opencv.hpp>
+#include "Thirdparty/aruco/aruco/aruco.h"
 
 
 namespace ORB_SLAM2
@@ -95,6 +97,7 @@ public:
     // Add by liujiamin 
     void AddMapAruco(MapAruco* pMA, const size_t &idx);
     MapAruco* GetMapAruco(const size_t &idx);
+    std::vector<MapAruco*> GetAllMapArucos();
 
     // KeyPoint functions
     std::vector<size_t> GetFeaturesInArea(const float &x, const float  &y, const float  &r) const;
@@ -164,6 +167,8 @@ public:
 
     // Number of KeyPoints
     const int N;
+    //* Add by liujiamin--------
+    const int NA;
 
     // KeyPoints, stereo coordinate and descriptors (all associated by an index)
     const std::vector<cv::KeyPoint> mvKeys;
@@ -173,6 +178,7 @@ public:
     //* Add by liujiamin
     std::vector<std::vector<float> > mvuArucoRight;
     const cv::Mat mDescriptors;
+    std::vector<aruco::Marker> mvMarkers;
 
     //BoW
     DBoW2::BowVector mBowVec;

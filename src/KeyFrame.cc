@@ -42,7 +42,8 @@ KeyFrame::KeyFrame(Frame &F, Map *pMap, KeyFrameDatabase *pKFDB):
     mnMaxY(F.mnMaxY), mK(F.mK), mvpMapPoints(F.mvpMapPoints), mpKeyFrameDB(pKFDB),
     mpORBvocabulary(F.mpORBvocabulary), mbFirstConnection(true), mpParent(NULL), mbNotErase(false),
     mbToBeErased(false), mbBad(false), mHalfBaseline(F.mb/2), mpMap(pMap),
-    mvpMapArucos(F.mvpMapArucos), mvuArucoRight(F.mvuArucoRight)
+    mvpMapArucos(F.mvpMapArucos), mvuArucoRight(F.mvuArucoRight), NA(F.NA),
+    mvMarkers(F.mvMarkers)
 {
     mnId=nNextId++;
 
@@ -288,6 +289,13 @@ vector<MapPoint*> KeyFrame::GetMapPointMatches()
 {
     unique_lock<mutex> lock(mMutexFeatures);
     return mvpMapPoints;
+}
+
+// Add by liujiamin ----------
+vector<MapAruco*> KeyFrame::GetAllMapArucos()
+{
+    unique_lock<mutex> lock(mMutexFeatures);
+    return mvpMapArucos;
 }
 
 MapPoint* KeyFrame::GetMapPoint(const size_t &idx)
