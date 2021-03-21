@@ -53,6 +53,10 @@ public:
     // add by liujiamin
     void AddMapAruco(MapAruco* pMA);
     std::vector<MapAruco*> GetAllMapArucos();
+    void UpdateAruco();
+    void AddArucoMapPointsID(int id);
+    std::vector<int> GetAllArucoMapPointID();
+    void AddArucoMapPoint(MapPoint* pAMP);
 
     std::vector<KeyFrame*> GetAllKeyFrames();
     std::vector<MapPoint*> GetAllMapPoints();
@@ -76,8 +80,10 @@ protected:
     std::set<MapPoint*> mspMapPoints;
     std::set<KeyFrame*> mspKeyFrames;
 
-    // add by liujiamin
+    //* add by liujiamin
     std::set<MapAruco*> mspMapArucos;
+    std::set<int> msAMPsid;
+    std::set<MapPoint*> mspArucoMapPoints;
 
     std::vector<MapPoint*> mvpReferenceMapPoints;
 

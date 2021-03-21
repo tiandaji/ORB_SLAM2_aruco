@@ -42,11 +42,13 @@ void Optimizer::GlobalBundleAdjustemnt(Map* pMap, int nIterations, bool* pbStopF
 {
     vector<KeyFrame*> vpKFs = pMap->GetAllKeyFrames();
     vector<MapPoint*> vpMP = pMap->GetAllMapPoints();
-    BundleAdjustment(vpKFs,vpMP,nIterations,pbStopFlag, nLoopKF, bRobust);
+    vector<MapAruco*> vpMA = pMap->GetAllMapArucos(); //! <添加>
+    BundleAdjustment(vpKFs,vpMP,vpMA,nIterations,pbStopFlag, nLoopKF, bRobust); //! <添加vpMA>
 }
 
 
 void Optimizer::BundleAdjustment(const vector<KeyFrame *> &vpKFs, const vector<MapPoint *> &vpMP,
+                                 const vector<MapAruco *> &vpMA,
                                  int nIterations, bool* pbStopFlag, const unsigned long nLoopKF, const bool bRobust)
 {
     vector<bool> vbNotIncludedMP;
@@ -67,6 +69,8 @@ void Optimizer::BundleAdjustment(const vector<KeyFrame *> &vpKFs, const vector<M
 
     long unsigned int maxKFid = 0;
 
+    vector<int> viSaveKFid;
+
     // Set KeyFrame vertices
     for(size_t i=0; i<vpKFs.size(); i++)
     {
@@ -78,12 +82,15 @@ void Optimizer::BundleAdjustment(const vector<KeyFrame *> &vpKFs, const vector<M
         vSE3->setId(pKF->mnId);
         vSE3->setFixed(pKF->mnId==0);
         optimizer.addVertex(vSE3);
+        viSaveKFid.push_back(pKF->mnId);
         if(pKF->mnId>maxKFid)
             maxKFid=pKF->mnId;
     }
 
     const float thHuber2D = sqrt(5.99);
     const float thHuber3D = sqrt(7.815);
+
+    long unsigned int maxMPid = 0;
 
     // Set MapPoint vertices
     for(size_t i=0; i<vpMP.size(); i++)
@@ -94,6 +101,8 @@ void Optimizer::BundleAdjustment(const vector<KeyFrame *> &vpKFs, const vector<M
         g2o::VertexSBAPointXYZ* vPoint = new g2o::VertexSBAPointXYZ();
         vPoint->setEstimate(Converter::toVector3d(pMP->GetWorldPos()));
         const int id = pMP->mnId+maxKFid+1;
+        if(id>maxMPid)
+            maxMPid=id;
         vPoint->setId(id);
         vPoint->setMarginalized(true);
         optimizer.addVertex(vPoint);
@@ -183,6 +192,61 @@ void Optimizer::BundleAdjustment(const vector<KeyFrame *> &vpKFs, const vector<M
         }
     }
 
+    // TODO: Set MapAruco vertices
+    // 
+    for(size_t i=0; i<vpMA.size(); i++)
+    {
+        MapAruco* pMA = vpMA[i];
+        g2o::VertexSE3Expmap *vSE3Aruco = new g2o::VertexSE3Expmap();
+        vSE3Aruco->setEstimate(Converter::toSE3Quat(pMA->GetTwm()));
+        int aid = pMA->GetMapArucoID()+1+maxMPid;
+        // if(aid > maxMAid)
+        //     maxMAid = aid;
+        // cout<<"Aruco ID = "<<pMA->GetMapArucoID()<<"; aid = "<<aid<<endl;
+        vSE3Aruco->setId(aid);
+        vSE3Aruco->setFixed(false);        
+        optimizer.addVertex(vSE3Aruco);
+        const map<KeyFrame*, size_t> mapObs = pMA->GetObservations();
+        for(map<KeyFrame*, size_t>::const_iterator mit=mapObs.begin(), mend=mapObs.end(); mit!=mend; mit++)
+        {
+            KeyFrame* pKFi = mit->first;
+            if(pKFi->isBad())
+                continue;
+            
+            int pKFiId = pKFi->mnId;
+            vector<int>::iterator iitId = find(viSaveKFid.begin(), viSaveKFid.end(), pKFiId);
+            if(iitId == viSaveKFid.end())
+                continue;
+            
+            size_t idx = mit->second;
+            double length = pMA->GetArucoLength();
+            g2o::EdgeMarker *e = new g2o::EdgeMarker(length);
+            e->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(pKFiId)) );
+            e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(aid))    );
+            Eigen::Matrix<double, 8,1, Eigen::ColMajor> obs;
+            int idobs = 0;
+            for(int cor=0; cor<4; cor++)
+            {
+                obs(idobs) = pKFi->mvArucoUn[4*idx+cor].x;
+                idobs++;
+                obs(idobs) = pKFi->mvArucoUn[4*idx+cor].y;
+                idobs++;
+            }
+            e->setMeasurement(obs);
+            Eigen::MatrixXd Info = Eigen::Matrix<double,8,8>::Identity();
+            e->setInformation(Info);
+            g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
+            e->setRobustKernel(rk);
+            rk->setDelta(thHuber2D);
+            e->fx = pKFi->fx;
+            e->fy = pKFi->fy;
+            e->cx = pKFi->cx;
+            e->cy = pKFi->cy;
+            optimizer.addEdge(e);
+
+        }
+    }
+
     // Optimize!
     optimizer.initializeOptimization();
     optimizer.optimize(nIterations);
@@ -232,6 +296,20 @@ void Optimizer::BundleAdjustment(const vector<KeyFrame *> &vpKFs, const vector<M
             Converter::toCvMat(vPoint->estimate()).copyTo(pMP->mPosGBA);
             pMP->mnBAGlobalForKF = nLoopKF;
         }
+    }
+
+    //MapArucos
+    // 暂时就先不管回环的情况
+    for(size_t i=0; i<vpMA.size(); i++)
+    {
+        MapAruco* pMA = vpMA[i];
+        int aid = pMA->GetMapArucoID()+1+maxMPid;
+        g2o::VertexSE3Expmap* vSE3Aruco = static_cast<g2o::VertexSE3Expmap*>(optimizer.vertex(aid) );
+        g2o::SE3Quat SE3quat = vSE3Aruco->estimate();
+        cv::Mat T = Converter::toCvMat(SE3quat);
+        cv::Mat R = T.rowRange(0,3).colRange(0,3);
+        cv::Mat t = T.rowRange(0,3).col(3);
+        pMA->SetRtwm(R, t);
     }
 
 }
@@ -360,72 +438,75 @@ int Optimizer::PoseOptimization(Frame *pFrame)
     }
     }
 
-
-    //! 第一步错了
-    //! 还没加入关键帧的时候，尽管看到了该id号的二维码，也不能加入到优化内，所以不能以NAruco作为判断依据。
-    int NAruco=pFrame->NA;
-    int FailNum=0;
-    int NULLNum=0;
-    {
-    unique_lock<mutex> lock(MapAruco::mGlobalMutex);
-    cout<<"NAruco=\t"<<NAruco<<endl;
-    for(size_t i=0; i<NAruco; i++)
-    {
-        cout<<"In lock(MapAruco::mGlobalMutex),,,,,,,,,,"<<endl;
-        MapAruco* pMA = pFrame->mvpMapArucos[i];
-        if(pMA) //不为空，代表该ID号的Aruco已加入到MAP中
-        {
-            // cout<<"pMA->ID=\t"<<pMA->GetMapArucoID()<<endl;
-            for(size_t j=0; j<4; j++)
-            {
-                nInitialCorrespondences++;
-
-                Eigen::Matrix<double,3,1> obs;
-                if(pFrame->mvuArucoRight[i][j]==-1)
-                {
-                    FailNum++;
-                    break;
-                }
-                obs<< pFrame->mvMarkers[i][j].x, pFrame->mvMarkers[i][j].y, pFrame->mvuArucoRight[i][j];
-                // cout<<"obs: \n"<<obs<<endl;
-                g2o::EdgeStereoSE3ProjectXYZOnlyPose* e = new g2o::EdgeStereoSE3ProjectXYZOnlyPose();
-
-                e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(0)));
-                e->setMeasurement(obs);
-                const float weight = 10;//我自己设的
-                Eigen::Matrix3d Info = Eigen::Matrix3d::Identity()*weight;
-                e->setInformation(Info);
-
-                g2o::RobustKernelHuber *rk = new g2o::RobustKernelHuber;
-                e->setRobustKernel(rk);
-                rk->setDelta(deltaStereo);
-
-                e->fx=pFrame->fx;
-                e->fy=pFrame->fy;
-                e->cx=pFrame->cx;
-                e->cy=pFrame->cy;
-                e->bf=pFrame->mbf;
-                //此处要获得aruco每个角点的世界坐标。
-                cv::Mat Xw = pMA->GetPosInWorld(j);
-                e->Xw[0] = Xw.at<float>(0);
-                e->Xw[1] = Xw.at<float>(1);
-                e->Xw[2] = Xw.at<float>(2);
-                optimizer.addEdge(e);
-                vpEdgesStereo.push_back(e);
-                vnIndexEdgeStereo.push_back(N+4*(i-FailNum-NULLNum)+j);
-            }
-        }
-        else //为空，代表该ID号的Aruco还未因为关键帧加入到MAP中
-        {
-            NULLNum++;
-        }
-        
-    }
-    }
-
-
     if(nInitialCorrespondences<3)
         return 0;
+
+    //Todo: Set Aruco vertices
+    
+    {
+        unique_lock<mutex> lock(MapAruco::mGlobalMutex); 
+        unsigned long maxArucoId = 0;
+        for(size_t i=0; i<pFrame->NA; i++) //! 这里没有考虑以后会出现的回环问题，而是将见到的Aruco全用。
+        {
+            MapAruco* pMA = pFrame->mvpMapArucos[i];
+            if(pMA)
+            {
+                pFrame->mvbArucoOutlier[i] = false; //! pFrame中没有这个变量-> 已有
+                g2o::VertexSE3Expmap *vSE3Aruco = new g2o::VertexSE3Expmap();
+                vSE3Aruco->setEstimate(Converter::toSE3Quat(pMA->GetTwm())); // Twm 要优化的变量，但在此处要固定。
+                int id = pMA->GetMapArucoID()+1;
+                if( id > maxArucoId )
+                    maxArucoId = id;
+                vSE3Aruco->setId(id);
+                vSE3Aruco->setFixed(true);
+                optimizer.addVertex(vSE3Aruco);
+
+                double length = pMA->GetArucoLength();
+                g2o::EdgeMarker* e = new g2o::EdgeMarker(length);
+                e->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(0) ));
+                e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(id)));
+                Eigen::Matrix<double, 8, 1, Eigen::ColMajor> obs;
+                //! obs 应该使用去畸变之后的 (u,v)
+                int idx = 0;
+                for(int cor=0; cor<4; cor++)
+                {
+                    // obs(idx) = pFrame->mvMarkers[i][cor].x;
+                    obs(idx) = pFrame->mvArucoUn[4*i+cor].x;
+                    idx++;
+                    obs(idx) = pFrame->mvArucoUn[4*i+cor].y;
+                    idx++;
+                }
+                e->setMeasurement(obs); // Vector8D
+                Eigen::MatrixXd Info(8,8);
+                // Set Information matrix
+                for(int q=0; q<8; q++)
+                {
+                    for(int w=0; w<8; w++)
+                    {
+                        if(q==w){
+                            Info(q,w)=1;
+                        }
+                        else 
+                            Info(q,w)=0;
+                    }
+                }
+                e->setInformation(Info);
+                g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
+                e->setRobustKernel(rk);
+                rk->setDelta(deltaStereo);
+                e->fx = pFrame->fx;
+                e->fy = pFrame->fy;
+                e->cx = pFrame->cx;
+                e->cy = pFrame->cy;
+                // cout<<"--------optimizer.add an Aruco Edge------"<<endl;
+                optimizer.addEdge(e);
+
+            }
+        }
+
+    }
+
+
 
     // We perform 4 optimizations, after each optimization we classify observation as inlier/outlier
     // At the next optimization, outliers are not included, but at the end they can be classified as inliers again.
@@ -509,12 +590,13 @@ int Optimizer::PoseOptimization(Frame *pFrame)
     g2o::SE3Quat SE3quat_recov = vSE3_recov->estimate();
     cv::Mat pose = Converter::toCvMat(SE3quat_recov);
     pFrame->SetPose(pose);
-
+    // cout<< "---------------END OF POSE OPTIMIZATION-------------" <<endl;
     return nInitialCorrespondences-nBad;
 }
 
 void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap)
 {    
+    // cout<<"it's in Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap)"<<endl;
     // Local KeyFrames: First Breath Search from Current Keyframe
     list<KeyFrame*> lLocalKeyFrames;
     vector<int> viSaveKFid;
@@ -575,52 +657,46 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
     }
 
     // TODO: add MapAruco as vertex and edges
-    // ! 这里需要注意在KeyFrame中，判断Aruco是否有效的条件是看mvuArucoRight == -1？
-    // ! 不能添加重复的Aruco,但是也要确保下次进入LocalBA能加入
-    list<MapAruco*> lLocalMapArucos;
-    vector<int> viSaveArucoID;
-    cout<<"`````````````````````````````````````````It's in the Optimizer::LocalBundleAdjustment(...)"<<endl;
-    for(list<KeyFrame*>::iterator lit=lLocalKeyFrames.begin(),lend=lLocalKeyFrames.end(); lit!=lend; lit++)
+    list<MapAruco*> lLocalMapArucosMono;
+    vector<int> viSaveArucoId;
+    for(list<KeyFrame*>::iterator lit=lLocalKeyFrames.begin() , lend=lLocalKeyFrames.end(); lit!=lend; lit++)
     {
         int nAruco = (*lit)->NA;
         for(size_t i=0; i<nAruco; i++)
         {
-            if( (*lit)->mvuArucoRight[i][0]!=-1 )
+            MapAruco* pMA = (*lit)->GetMapAruco(i);
+            if(pMA)
             {
-                MapAruco* pMA=(*lit)->GetMapAruco(i);
-                int iID=pMA->GetMapArucoID();
-                vector<int>::iterator viit = find(viSaveArucoID.begin(), viSaveArucoID.end(), iID);
-                if( viit == viSaveArucoID.end() )
+                // * 此处没管mvuArucoRight
+                int iId = pMA->GetMapArucoID();
+                vector<int>::iterator viit = find(viSaveArucoId.begin(), viSaveArucoId.end(), iId);
+                if(viit == viSaveArucoId.end()) //不添加重复的
                 {
-                    lLocalMapArucos.push_back(pMA);
-                    viSaveArucoID.push_back(iID);
-                    cout<<"lLocalMapArucos.push_back:\t"<<pMA->GetMapArucoID()<<endl;
+                    lLocalMapArucosMono.push_back(pMA);
+                    viSaveArucoId.push_back(iId);
                 }
             }
         }
     }
-    // ! 需要添加lFixedCameras中的KeyFrame
-    cout<<"----lLocalKeyFrames -to-> lFixedCameras ---"<<endl;
     for(list<KeyFrame*>::iterator lit=lFixedCameras.begin(),lend=lFixedCameras.end(); lit!=lend; lit++ )
     {
         int nAruco = (*lit)->NA;
         for(size_t i=0; i<nAruco; i++)
         {
-            if( (*lit)->mvuArucoRight[i][0]!=-1 )
+            MapAruco* pMA = (*lit)->GetMapAruco(i);
+            if(pMA)
             {
-                MapAruco* pMA=(*lit)->GetMapAruco(i);
-                int iID=pMA->GetMapArucoID();
-                vector<int>::iterator viit = find(viSaveArucoID.begin(), viSaveArucoID.end(), iID);
-                if(viit==viSaveArucoID.end())
+                // * 此处没管mvuArucoRight
+                int iId = pMA->GetMapArucoID();
+                vector<int>::iterator viit = find(viSaveArucoId.begin(), viSaveArucoId.end(), iId);
+                if(viit == viSaveArucoId.end())
                 {
-                    lLocalMapArucos.push_back(pMA);
-                    viSaveArucoID.push_back(iID);
-                    cout<<"lLocalMapArucos.push_back:\t"<<pMA->GetMapArucoID()<<endl;
+                    lLocalMapArucosMono.push_back(pMA);
+                    viSaveArucoId.push_back(iId);
                 }
             }
         }
     }
-    cout<<"```````````````````````````````````````````````END of Adding MapArucos`````"<<endl;
 
     // Setup optimizer
     g2o::SparseOptimizer optimizer;
@@ -685,12 +761,15 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
     vector<MapPoint*> vpMapPointEdgeStereo;
     vpMapPointEdgeStereo.reserve(nExpectedSize);
 
+    //* Add about Aruco
+    // const int nExpectedAruco = 
+    vector<g2o::EdgeMarker*> vpEdgesAruco;
+    
     const float thHuberMono = sqrt(5.991);
     const float thHuberStereo = sqrt(7.815);
 
    //* 存最大地图点的ID号
     unsigned long maxMPid = 0;
-
     for(list<MapPoint*>::iterator lit=lLocalMapPoints.begin(), lend=lLocalMapPoints.end(); lit!=lend; lit++)
     {
         MapPoint* pMP = *lit;
@@ -779,115 +858,77 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
         }
     }
 
-    // // TODO: set MAPARUCO Vertices 
-    int MAcount = 0;
-    cout<<"There is OK! :" <<lLocalMapArucos.size()<<endl;
-    for(list<MapAruco*>::iterator lit=lLocalMapArucos.begin(), lend=lLocalMapArucos.end(); lit!=lend; lit++ )
+    unsigned long maxMAid = 0;
+    for(list<MapAruco*>::iterator lit=lLocalMapArucosMono.begin(), lend=lLocalMapArucosMono.end(); lit!=lend; lit++)
     {
+        // cout<<"in for--lit"<<endl;
         MapAruco* pMA = *lit;
-        cout<<"In creating edges, and pMA id is:\t"<<pMA->GetMapArucoID()<<endl;
-        
-        //! 注意MapAruco有四个角点
-        for(size_t i=0; i<4; i++)
+        g2o::VertexSE3Expmap *vSE3Aruco = new g2o::VertexSE3Expmap();
+        vSE3Aruco->setEstimate(Converter::toSE3Quat(pMA->GetTwm()));
+        int aid = pMA->GetMapArucoID()+1+maxMPid;
+        if(aid > maxMAid)
+            maxMAid = aid;
+        // cout<<"Aruco ID = "<<pMA->GetMapArucoID()<<"; aid = "<<aid<<endl;
+        vSE3Aruco->setId(aid);
+        // vSE3Aruco->setMarginalized(true); 
+        vSE3Aruco->setFixed(false);       
+        optimizer.addVertex(vSE3Aruco);
+        const map<KeyFrame*, size_t> mapObs = pMA->GetObservations();
+        for(map<KeyFrame*, size_t>::const_iterator mit=mapObs.begin(), mend=mapObs.end(); mit!=mend; mit++)
         {
-            g2o::VertexSBAPointXYZ* vpoint = new g2o::VertexSBAPointXYZ();
-            cv::Mat pPos = pMA->GetPosInWorld(i);
-            // ! 现在设置的估计值，之后优化完是不是还得重新给MapAruco赋值。
-            vpoint->setEstimate(Converter::toVector3d(pPos));
-            int id = MAcount*4 + i + maxMPid + 1;
-            vpoint->setId(id);
-            vpoint->setMarginalized(true);
-            optimizer.addVertex(vpoint);
-
-            const map<KeyFrame*,size_t> observations=pMA->GetObservations();
-
-            for(map<KeyFrame*,size_t>::const_iterator mit=observations.begin(),mend=observations.end(); mit!=mend; mit++ )
+            KeyFrame* pKFi = mit->first;
+            if(pKFi->isBad())
+                continue;
+            int pKFiId = pKFi->mnId;
+            vector<int>::iterator iitId = find(viSaveKFid.begin(), viSaveKFid.end(), pKFiId);
+            
+            // 判断该关键帧是否在要优化的帧内，避免相关的帧没有相关的优化节点。
+            //* 优化方向：考虑将与当前帧可视的Aruco的相关的帧全部加入
+            if(iitId == viSaveKFid.end()) 
+                continue;
+            
+            size_t idx = mit->second; 
+            // cout<<"Now is for kf = "<<pKFi->mnId<<"; idx = "<<idx;
+            // * 如果有双目的话，则需要通过mvuArucoRight分情况创建边
+            double length = pMA->GetArucoLength();
+            g2o::EdgeMarker *e = new g2o::EdgeMarker(length);
+            e->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(pKFiId)));
+            e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(aid)));
+            Eigen::Matrix<double, 8, 1, Eigen::ColMajor> obs;
+            int idobs = 0;
+            for(int cor=0; cor<4; cor++)
             {
-                KeyFrame* pKFi=mit->first;
-                cout<<"KeyFrame* pKFi=mit->first;"<<endl;
-                if(!pKFi->isBad())
-                {
-                    //! 我这里只有对双目的处理
-                    cout<<"size_t idx = mit->second;"<<endl;
-                    size_t idx = mit->second;
-                    
-                    // MapAruco* ppMA = pKFi->GetMapAruco(idx);
-                    float ur=pKFi->mvuArucoRight[idx][i];
-                    cout<<"In creating edges, and ur:\t"<<ur<<"\t";
-                    cout<< pKFi->mvMarkers[idx][i].x<<"\t"<< pKFi->mvMarkers[idx][i].y<<endl;
-                    
-                    Eigen::Matrix<double,3,1> obs;
-                    float ul=pKFi->mvMarkers[idx][i].x;
-                    float vl=pKFi->mvMarkers[idx][i].y;
-                    
-                    // cout<<"ur:\t"<<ur<<endl;
-                    
-                    obs << ul, vl, ur;
-
-                    g2o::EdgeStereoSE3ProjectXYZ* e = new g2o::EdgeStereoSE3ProjectXYZ();
-                    cout<<"before ur==-1"<<endl;
-                    if(ur==-1)
-                    {
-                        e->setLevel(1);
-                    }
-                    cout<<"before e->setVertex(0,"<<endl;
-                    e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(id) ) );
-                    cout<<"before e->setVertex(1,"<<endl;
-                    int pkfimnid = pKFi->mnId;
-                    vector<int>::iterator viit=find(viSaveKFid.begin(), viSaveKFid.end(), pkfimnid );
-                    if(viit == viSaveKFid.end() )
-                    {
-                        cout<<"there is no keyframe's id is \t"<<pkfimnid<<endl;
-                        continue;
-                    }
-                    e->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(pkfimnid) ) ); //!!!!!  
-                    //!是否可能是当前帧的id号没在局部地图中。 --> 所以得设一个数保存局部地图中关键帧id号  --> 然后判断是否存有该id号的关键帧
-                    e->setMeasurement(obs);
-                    const float weight = 10;//我自己设的
-                    Eigen::Matrix3d Info = Eigen::Matrix3d::Identity()*weight;
-                    e->setInformation(Info);
-
-                    g2o::RobustKernelHuber *rk = new g2o::RobustKernelHuber;
-                    e->setRobustKernel(rk);
-                    rk->setDelta(thHuberStereo);
-                    
-                    cout<<"before seting e->fx"<<endl;
-                    e->fx = pKFi->fx;
-                    e->fy = pKFi->fy;
-                    e->cx = pKFi->cx;
-                    e->cy = pKFi->cy;
-                    e->bf = pKFi->mbf;
-                    
-                    cout<<"before addEdge(e)"<<endl;
-                    if(!e)
-                    {
-                        cout<<"edge error"<<endl;
-                        continue;
-                    }
-                    optimizer.addEdge(e);
-                    cout<<"addEdge(e)"<<endl;
-
-                    // vpEdgesStereo.push_back(e);//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-                    // vpEdgeKFStereo.push_back(pKFi);//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-                    // vpMapPointEdgeStereo.push_back(pMP); //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-                }
+                obs(idobs) = pKFi->mvArucoUn[4*idx+cor].x;
+                idobs++;
+                obs(idobs) = pKFi->mvArucoUn[4*idx+cor].y;
+                idobs++;
             }
-
+            e->setMeasurement(obs);
+            Eigen::MatrixXd Info = Eigen::Matrix<double,8,8>::Identity()*1;
+            e->setInformation(Info);
+            g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
+            e->setRobustKernel(rk);
+            rk->setDelta(thHuberMono);
+            e->fx = pKFi->fx;
+            e->fy = pKFi->fy;
+            e->cx = pKFi->cx;
+            e->cy = pKFi->cy;
+            optimizer.addEdge(e);
+            vpEdgesAruco.push_back(e);
+            // cout<<"========optimizer.add an Aruco Edge----In LocalBA(...)========="<<endl;
+            
         }
-
-
-
-        MAcount++;
-        
     }
+    // cout<<"After set Edge of Marker"<<endl;
 
     if(pbStopFlag)
         if(*pbStopFlag)
             return;
 
+    // cout<<"iterative optimization"<<endl;
     optimizer.initializeOptimization();
     optimizer.optimize(5);
-
+    // cout<<"optimizer.optimize(5);"<<endl;
     bool bDoMore= true;
 
     if(pbStopFlag)
@@ -930,11 +971,20 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
         e->setRobustKernel(0);
     }
 
+    // TODO: check MapAruco inlier observations
+    for(size_t i=0; i!=vpEdgesAruco.size(); i++)
+    {
+        g2o::EdgeMarker* e = vpEdgesAruco[i];
+        if(e->chi2()>5.991) //* 关于这个深度的判断，根据之前的实验，一般都是在前面诶，先放着
+            e->setLevel(1);
+        e->setRobustKernel(0);
+    }
+
     // Optimize again without the outliers
 
     optimizer.initializeOptimization(0);
     optimizer.optimize(10);
-
+    // cout<<"optimizer.optimize(10);"<<endl;
     }
 
     vector<pair<KeyFrame*,MapPoint*> > vToErase;
@@ -970,6 +1020,7 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
             vToErase.push_back(make_pair(pKFi,pMP));
         }
     }
+    // cout<<"Check inlier observations"<<endl;
 
     // Get Map Mutex
     unique_lock<mutex> lock(pMap->mMutexMapUpdate);
@@ -987,6 +1038,7 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
     //! 如果要考虑MapAruco的质量，此处应该考虑MapAruco观测的剔除
 
     // Recover optimized data
+    // cout<<"========Recover optimized data========"<<endl;
 
     //Keyframes
     for(list<KeyFrame*>::iterator lit=lLocalKeyFrames.begin(), lend=lLocalKeyFrames.end(); lit!=lend; lit++)
@@ -996,6 +1048,7 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
         g2o::SE3Quat SE3quat = vSE3->estimate();
         pKF->SetPose(Converter::toCvMat(SE3quat));
     }
+    // pMap->UpdateAruco();
 
     //Points
     for(list<MapPoint*>::iterator lit=lLocalMapPoints.begin(), lend=lLocalMapPoints.end(); lit!=lend; lit++)
@@ -1006,22 +1059,19 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
         pMP->UpdateNormalAndDepth();
     }
 
-    //! MapAruco
-    int cntA = 0;
-    cout<<"[[[[[[[[update MapAruco corners<><><><><><><><><><><><><><>"<<endl;
-    for(list<MapAruco*>::iterator lit=lLocalMapArucos.begin(), lend=lLocalMapArucos.end(); lit!=lend; lit++ )
+    // //! MapAruco
+    for(list<MapAruco*>::iterator lit=lLocalMapArucosMono.begin(), lend=lLocalMapArucosMono.end(); lit!=lend; lit++)
     {
+        // cout<<"========Recover MapAruco data========"<<endl;
         MapAruco* pMA = *lit;
-        for(size_t i=0; i<4; i++)
-        {
-            g2o::VertexSBAPointXYZ* vpoint = static_cast<g2o::VertexSBAPointXYZ*>(optimizer.vertex(maxMPid+1+i+4*cntA ) );//! find the id;
-            cv::Mat p=Converter::toCvMat(vpoint->estimate() ); 
-            pMA->SetPosInWorld(i, p);
-            cout<<"In Update MapAruco: "<<pMA->GetMapArucoID()<<"\t"<<i<<"\n"<<p<<endl;
-        }
-        cntA++;
+        g2o::VertexSE3Expmap* vSE3Aruco = static_cast<g2o::VertexSE3Expmap*>(optimizer.vertex(pMA->GetMapArucoID()+maxMPid+1));
+        g2o::SE3Quat SE3quat = vSE3Aruco->estimate();
+        cv::Mat T = Converter::toCvMat(SE3quat);
+        cv::Mat R = T.rowRange(0,3).colRange(0,3);
+        cv::Mat t = T.rowRange(0,3).col(3);
+        pMA->SetRtwm(R, t);
     }
-
+    // cout<< "============END OF LOCAL BA============" <<endl;
 }
 
 

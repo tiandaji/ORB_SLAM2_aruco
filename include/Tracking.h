@@ -80,6 +80,8 @@ public:
     // void CheckArucoID(Frame* F, MapAruco* MA, const size_t &idx);
     void CheckArucoID();
 
+    void Triangulate(cv::Point2f &kp1, cv::Point2f &kp2, cv::Mat &P1, cv::Mat &P2, cv::Mat &x3D);
+
 public:
 
     // Tracking states
@@ -122,6 +124,9 @@ public:
 
     // add by liujiamin
     set<int> msiArucoDatabase;
+    bool mbUseAruco;
+    std::vector<cv::Point3f> mvIniP3AD;
+    std::map<int, vector<cv::Point3f>> mmAruMPs;
 
 protected:
 

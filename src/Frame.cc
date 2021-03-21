@@ -52,7 +52,8 @@ Frame::Frame(const Frame &frame)
      mvScaleFactors(frame.mvScaleFactors), mvInvScaleFactors(frame.mvInvScaleFactors),
      mvLevelSigma2(frame.mvLevelSigma2), mvInvLevelSigma2(frame.mvInvLevelSigma2),
      mvMarkers(frame.mvMarkers),mvpMapArucos(frame.mvpMapArucos),NA(frame.NA), 
-     mvuArucoRight(frame.mvuArucoRight)
+     mvuArucoRight(frame.mvuArucoRight),mvbArucoOutlier(frame.mvbArucoOutlier), mvpArucoMPs(frame.mvpArucoMPs),
+     mvArucoUn(frame.mvArucoUn)
 {
     for(int i=0;i<FRAME_GRID_COLS;i++)
         for(int j=0; j<FRAME_GRID_ROWS; j++)
@@ -159,20 +160,27 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeSt
             mvuArucoRight.push_back(vARight);
         }
 
-        cout<<"m.id:\t"<<m.id<<endl;
-        cout<<m[0].x<<"\t"<<m[1].x<<"\t"<<m[2].x<<"\t"<<m[3].x<<"\t"<<endl;
-        cout<<mvuArucoRight[cou][0]<<"\t"<<mvuArucoRight[cou][1]<<"\t"<<mvuArucoRight[cou][2]<<"\t"<<mvuArucoRight[cou][3]<<"\t"<<endl;
+        // cout<<"m.id:\t"<<m.id<<endl;
+        // cout<<m[0].x<<"\t"<<m[1].x<<"\t"<<m[2].x<<"\t"<<m[3].x<<"\t"<<endl;
+        // cout<<mvuArucoRight[cou][0]<<"\t"<<mvuArucoRight[cou][1]<<"\t"<<mvuArucoRight[cou][2]<<"\t"<<mvuArucoRight[cou][3]<<"\t"<<endl;
         cou++;
         
     }
 
-    cout<<"=====END OF FRAME CONSTRUCTION========================="<<endl;
+    // cout<<"=====END OF FRAME CONSTRUCTION========================="<<endl;
 
     // TODO: Add mvpMapArucos
     NA = mvMarkers.size();
     mvpMapArucos = vector<MapAruco*>(NA,static_cast<MapAruco*>(NULL));
+    mvpArucoMPs = vector<MapPoint*>(4*NA,static_cast<MapPoint*>(NULL));
+    mvbArucoOutlier = vector<bool>(NA,false);
+    if(NA!=0)
+        UndistortArucoCorners();
+    else
+        mvArucoUn.resize(0);
 }
 
+// RGB-D
 Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const double &timeStamp, ORBextractor* extractor,ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth)
     :mpORBvocabulary(voc),mpORBextractorLeft(extractor),mpORBextractorRight(static_cast<ORBextractor*>(NULL)),
      mTimeStamp(timeStamp), mK(K.clone()),mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth)
@@ -229,9 +237,15 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const double &timeSt
     // TODO: Add mvpMapArucos
     NA = 0;
     mvpMapArucos = vector<MapAruco*>(NA,static_cast<MapAruco*>(NULL));
+    mvpArucoMPs = vector<MapPoint*>(4*NA,static_cast<MapPoint*>(NULL));
+    mvbArucoOutlier = vector<bool>(NA,false);
+    if(NA!=0)
+        UndistortArucoCorners();
+    else
+        mvArucoUn.resize(0);
 }
 
-
+//Monocular
 Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extractor,ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth)
     :mpORBvocabulary(voc),mpORBextractorLeft(extractor),mpORBextractorRight(static_cast<ORBextractor*>(NULL)),
      mTimeStamp(timeStamp), mK(K.clone()),mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth)
@@ -287,9 +301,82 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extra
 
     AssignFeaturesToGrid();
 
+    // TODO: Detect Aruco
+    // aruco::CameraParameters camera(mK, mDistCoef, cv::Size(mnMaxX, mnMaxY));
+    aruco::CameraParameters camera;
+    camera.readFromXMLFile("/home/gzy/data/SPM/video3/cam0.yml");
+    
+    float TheMarkerSize = 0.165;
+    // camera.setParams
+    aruco::MarkerDetector detector;
+    detector.setDictionary("ARUCO");
+    detector.setDetectionMode(aruco::DetectionMode::DM_NORMAL);
+    detector.getParameters().setCornerRefinementMethod(aruco::CornerRefinementMethod::CORNER_LINES);
+    mvMarkers = detector.detect(imGray, camera, TheMarkerSize);
     // TODO: Add mvpMapArucos
-    NA = 0;
+    NA = mvMarkers.size();
     mvpMapArucos = vector<MapAruco*>(NA,static_cast<MapAruco*>(NULL));
+    mvpArucoMPs = vector<MapPoint*>(4*NA,static_cast<MapPoint*>(NULL));
+    mvbArucoOutlier = vector<bool>(NA,false);
+
+    float length=0.165;
+    const float fx = mK.at<float>(0,0);
+    const float fy = mK.at<float>(1,1);
+    const float cx = mK.at<float>(0,2);
+    const float cy = mK.at<float>(1,2);
+    int j=0;
+    // cout<<"UndistortArucoCorners"<<endl;
+    if(NA!=0)
+        UndistortArucoCorners();
+    else
+        mvArucoUn.resize(0);
+    for(auto i:mvMarkers)
+    {
+        // cout<<"id = "<<i.id<<endl;
+        
+        // cv::Mat c0=(cv::Mat_<float>(3,1)<<-length/2, length/2, 0);
+        // cv::Mat c1=(cv::Mat_<float>(3,1)<< length/2, length/2, 0);
+        // cv::Mat c2=(cv::Mat_<float>(3,1)<< length/2,-length/2, 0);
+        // cv::Mat c3=(cv::Mat_<float>(3,1)<<-length/2,-length/2, 0);
+        // cv::Mat vr;
+        // cv::Rodrigues(i.Rvec, vr);
+        // cv::Mat a3d10 = vr*c0+i.Tvec;
+        // cv::Mat a3d11 = vr*c1+i.Tvec;
+        // cv::Mat a3d12 = vr*c2+i.Tvec;
+        // cv::Mat a3d13 = vr*c3+i.Tvec; 
+        // float u0 = (a3d10.at<float>(0)/a3d10.at<float>(2))*fx+cx;
+        // float v0 = (a3d10.at<float>(1)/a3d10.at<float>(2))*fy+cy;
+        // cout<<i[0].x<<" "<<i[0].y<<"; \t";
+        // cout<<mvArucoUn[4*j].x<<" "<<mvArucoUn[4*j].y<<"; \t";
+        // cout<<u0<<" "<<v0<<endl;
+        // float u1 = (a3d11.at<float>(0)/a3d11.at<float>(2))*fx+cx;
+        // float v1 = (a3d11.at<float>(1)/a3d11.at<float>(2))*fy+cy;
+        // cout<<i[1].x<<" "<<i[1].y<<"; \t";
+        // cout<<mvArucoUn[4*j+1].x<<" "<<mvArucoUn[4*j+1].y<<"; \t";
+        // cout<<u1<<" "<<v1<<endl;
+        // float u2 = (a3d12.at<float>(0)/a3d12.at<float>(2))*fx+cx;
+        // float v2 = (a3d12.at<float>(1)/a3d12.at<float>(2))*fy+cy;
+        // cout<<i[2].x<<" "<<i[2].y<<"; \t";
+        // cout<<mvArucoUn[4*j+2].x<<" "<<mvArucoUn[4*j+2].y<<"; \t";
+        // cout<<u2<<" "<<v2<<endl;
+        // float u3 = (a3d13.at<float>(0)/a3d13.at<float>(2))*fx+cx;
+        // float v3 = (a3d13.at<float>(1)/a3d13.at<float>(2))*fy+cy;
+        // cout<<i[3].x<<" "<<i[3].y<<"; \t";
+        // cout<<mvArucoUn[4*j+3].x<<" "<<mvArucoUn[4*j+3].y<<"; \t";
+        // cout<<u3<<" "<<v3<<endl;
+        // j++;
+
+        std::vector<float> vARight;
+        vARight.push_back(-1);
+        vARight.push_back(-1);
+        vARight.push_back(-1);
+        vARight.push_back(-1);
+        mvuArucoRight.push_back(vARight);
+    }
+    
+    
+
+    
 }
 
 void Frame::AssignFeaturesToGrid()
@@ -495,6 +582,35 @@ void Frame::UndistortKeyPoints()
         kp.pt.x=mat.at<float>(i,0);
         kp.pt.y=mat.at<float>(i,1);
         mvKeysUn[i]=kp;
+    }
+}
+
+void Frame::UndistortArucoCorners()
+{
+    // cout<<"In UndistortArucoCorners"<<endl;
+    if(mDistCoef.at<float>(0)==0.0)
+    {
+        return;
+    }
+    cv::Mat mat(4*NA,2,CV_32F);
+    for(int i=0; i<NA; i++)
+    {
+        for(int j=0; j<4; j++)
+        {
+            mat.at<float>(4*i+j, 0)=mvMarkers[i][j].x;
+            mat.at<float>(4*i+j, 1)=mvMarkers[i][j].y;
+        }
+    }
+    mat=mat.reshape(2);
+    // cout<<mat.size()<<endl;
+    cv::undistortPoints(mat,mat,mK,mDistCoef,cv::Mat(),mK);
+    // cout<<"after UndistortArucoCorners"<<endl;
+    mat=mat.reshape(1);
+    mvArucoUn.resize(4*NA);
+    for(int i=0; i<4*NA; i++)
+    {
+        mvArucoUn[i].x = mat.at<float>(i,0);
+        mvArucoUn[i].y = mat.at<float>(i,1);
     }
 }
 

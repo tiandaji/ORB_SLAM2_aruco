@@ -51,6 +51,7 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
     mpKeyFrameDB(pKFDB), mpInitializer(static_cast<Initializer*>(NULL)), mpSystem(pSys), mpViewer(NULL),
     mpFrameDrawer(pFrameDrawer), mpMapDrawer(pMapDrawer), mpMap(pMap), mnLastRelocFrameId(0)
 {
+    mbUseAruco = true;
     // Load camera parameters from settings file
 
     cv::FileStorage fSettings(strSettingPath, cv::FileStorage::READ);
@@ -308,12 +309,12 @@ void Tracking::Track()
                 CheckReplacedInLastFrame();
 
                 // add TrackByAruco() !!! 这里忽略了很多条件，首先假设第一二帧都有marker
-                // if(!mCurrentFrame.mvMarkers.empty() && !mLastFrame.mvMarkers.empty())
-                // {
-                //     bOK = TrackByAruco();
-                // }
-                // else 
-                if(mVelocity.empty() || mCurrentFrame.mnId<mnLastRelocFrameId+2)
+                if(!mCurrentFrame.mvMarkers.empty() && !mLastFrame.mvMarkers.empty())
+                {
+                    bOK = TrackByAruco();
+                    // cout<<"TrackByAruco()"<<endl;
+                }
+                else if(mVelocity.empty() || mCurrentFrame.mnId<mnLastRelocFrameId+2)
                 {
                     bOK = TrackReferenceKeyFrame();
                 }
@@ -650,26 +651,114 @@ void Tracking::MonocularInitialization()
         cv::Mat Rcw; // Current Camera Rotation
         cv::Mat tcw; // Current Camera Translation
         vector<bool> vbTriangulated; // Triangulated Correspondences (mvIniMatches)
+        // vector<bool> vbTriAruco;
 
-        if(mpInitializer->Initialize(mCurrentFrame, mvIniMatches, Rcw, tcw, mvIniP3D, vbTriangulated))
+        //TODO: use Aruco's POSE to initialize
+        if(mbUseAruco)
         {
-            for(size_t i=0, iend=mvIniMatches.size(); i<iend;i++)
+            vector<cv::Mat> vmR21A;
+            vector<cv::Mat> vmt21A;
+            vector<pair<int,int>> vp;
+            for(int i=0; i<mInitialFrame.NA; i++)
+                for(int j=0; j<mCurrentFrame.NA; j++)
+                    if(mInitialFrame.mvMarkers[i].id == mCurrentFrame.mvMarkers[j].id)
+                        vp.push_back(make_pair(i,j));
+            // vector<aruco::Marker> vm1, vm2;
+            // for(size_t t=0; t<vp.size(); t++)
+            // {
+            //     vm1.push_back(mInitialFrame.mvMarkers[vp[t].first]);
+            //     vm2.push_back(mCurrentFrame.mvMarkers[vp[t].second]);
+            // }
+            int numA = vp.size();
+    
+            // TODO 存储1、2帧上对应二维码计算得到的位姿R和t
+            // vector<cv::KeyPoint> vAky1, vAky2;
+            // vAky1.resize(4*numA);
+            // vAky2.resize(4*numA);
+            // vector<pair<int,int>> vM12;
+            // vector<cv::Mat> vr1;
+            // vr1.resize(numA);
+            for(int i=0; i<numA; i++)
             {
-                if(mvIniMatches[i]>=0 && !vbTriangulated[i])
-                {
-                    mvIniMatches[i]=-1;
-                    nmatches--;
-                }
+                int n1 = vp[i].first;
+                int n2 = vp[i].second;
+                aruco::Marker pam1 = mInitialFrame.mvMarkers[n1];
+                aruco::Marker pam2 = mCurrentFrame.mvMarkers[n2];
+                // cout<<i<<" id = "<<pam1.id<<endl;
+                cv::Mat rr1,rr2;
+                cv::Rodrigues(pam1.Rvec, rr1);
+                cv::Rodrigues(pam2.Rvec, rr2);
+                vmR21A.push_back(rr2*rr1.t() );
+                vmt21A.push_back(-rr2*rr1.t()*pam1.Tvec+pam2.Tvec);
+                // vr1[i] = rr1;
+                // for(int j=0; j<4; j++)
+                // {
+                //     vAky1[4*i+j].pt.x= mInitialFrame.mvArucoUn[n1*4+j].x;
+                //     vAky1[4*i+j].pt.y= mInitialFrame.mvArucoUn[n1*4+j].y;
+                //     vAky2[4*i+j].pt.x= mCurrentFrame.mvArucoUn[n2*4+j].x;
+                //     vAky2[4*i+j].pt.y= mCurrentFrame.mvArucoUn[n2*4+j].y;
+                //     vM12.push_back(make_pair(4*i+j,4*i+j));
+                // }
             }
+            
+            int bestIdA=-1;
+            bool bIniA = mpInitializer->InitializeUseAruco(mCurrentFrame,mvIniMatches, vmR21A, vmt21A,mvIniP3D, vbTriangulated, bestIdA);
+            // bool bIniA = mpInitializer->InitializeUseAruco(mCurrentFrame,mvIniMatches, vAky1, vAky2, vM12, vmR21A, vmt21A,mvIniP3D, vbTriangulated, bestIdA, mvIniP3AD, vbTriAruco);
 
-            // Set Frame Poses
-            mInitialFrame.SetPose(cv::Mat::eye(4,4,CV_32F));
-            cv::Mat Tcw = cv::Mat::eye(4,4,CV_32F);
-            Rcw.copyTo(Tcw.rowRange(0,3).colRange(0,3));
-            tcw.copyTo(Tcw.rowRange(0,3).col(3));
-            mCurrentFrame.SetPose(Tcw);
+            if(bIniA)
+            {
+                for(size_t i=0, iend=mvIniMatches.size(); i<iend;i++)
+                {
+                    if(mvIniMatches[i]>=0 && !vbTriangulated[i])
+                    {
+                        mvIniMatches[i]=-1;
+                        nmatches--;
+                    }
+                }
+                mInitialFrame.SetPose(cv::Mat::eye(4,4,CV_32F));
+                cv::Mat Tcw = cv::Mat::eye(4,4,CV_32F);
+                cout<<"bestIdA = "<<bestIdA<<endl;
+                vmR21A[bestIdA].copyTo(Tcw.rowRange(0,3).colRange(0,3));
+                vmt21A[bestIdA].copyTo(Tcw.rowRange(0,3).col(3));
+                mCurrentFrame.SetPose(Tcw);
 
-            CreateInitialMapMonocular();
+                // for(int i=0; i<numA; i++)
+                // {
+                //     if(!vbTriAruco[4*i] || !vbTriAruco[4*i+1] || !vbTriAruco[4*i+2] || !vbTriAruco[4*i+3])
+                //     {
+                //         mvIniP3AD[4*i] = cv::Point3f(0,0,0);
+                //         mvIniP3AD[4*i+1] = cv::Point3f(0,0,0);
+                //         mvIniP3AD[4*i+2] = cv::Point3f(0,0,0);
+                //         mvIniP3AD[4*i+3] = cv::Point3f(0,0,0);
+                //     }
+                // }
+
+                CreateInitialMapMonocular();
+            }
+        }
+        else
+        {
+            bool bIni = mpInitializer->Initialize(mCurrentFrame, mvIniMatches, Rcw, tcw, mvIniP3D, vbTriangulated);
+            if(bIni)
+            {
+                for(size_t i=0, iend=mvIniMatches.size(); i<iend;i++)
+                {
+                    if(mvIniMatches[i]>=0 && !vbTriangulated[i])
+                    {
+                        mvIniMatches[i]=-1;
+                        nmatches--;
+                    }
+                }
+
+                // Set Frame Poses
+                mInitialFrame.SetPose(cv::Mat::eye(4,4,CV_32F));
+                cv::Mat Tcw = cv::Mat::eye(4,4,CV_32F);
+                Rcw.copyTo(Tcw.rowRange(0,3).colRange(0,3));
+                tcw.copyTo(Tcw.rowRange(0,3).col(3));
+                mCurrentFrame.SetPose(Tcw);
+                
+                CreateInitialMapMonocular();
+            }
         }
     }
 }
@@ -679,7 +768,7 @@ void Tracking::CreateInitialMapMonocular()
     // Create KeyFrames
     KeyFrame* pKFini = new KeyFrame(mInitialFrame,mpMap,mpKeyFrameDB);
     KeyFrame* pKFcur = new KeyFrame(mCurrentFrame,mpMap,mpKeyFrameDB);
-
+    //* 两个kf都有pose
 
     pKFini->ComputeBoW();
     pKFcur->ComputeBoW();
@@ -723,38 +812,57 @@ void Tracking::CreateInitialMapMonocular()
     // Bundle Adjustment
     cout << "New Map created with " << mpMap->MapPointsInMap() << " points" << endl;
 
-    Optimizer::GlobalBundleAdjustemnt(mpMap,20);
-
-    // Set median depth to 1
-    float medianDepth = pKFini->ComputeSceneMedianDepth(2);
-    float invMedianDepth = 1.0f/medianDepth;
-
-    if(medianDepth<0 || pKFcur->TrackedMapPoints(1)<100)
+    // 先全局优化之后加上Aruco的信息
+    // 1.pKFini; 2.pKFcur.
+    vector<int> viId;
+    float s = 0.165;
+    for(size_t i=0; i<mInitialFrame.NA; i++)
     {
-        cout << "Wrong initialization, reseting..." << endl;
-        Reset();
-        return;
-    }
+        aruco::Marker xM = mInitialFrame.mvMarkers[i];
+        MapAruco* pNewMA = new MapAruco(xM, pKFini, mpMap, s);
+        viId.push_back(xM.id);
+        pNewMA->SetRtwm(cv::Mat::eye(3,3,CV_32F), cv::Mat::zeros(3,1,CV_32F) );
 
-    // Scale initial baseline
-    cv::Mat Tc2w = pKFcur->GetPose();
-    Tc2w.col(3).rowRange(0,3) = Tc2w.col(3).rowRange(0,3)*invMedianDepth;
-    pKFcur->SetPose(Tc2w);
-
-    // Scale points
-    vector<MapPoint*> vpAllMapPoints = pKFini->GetMapPointMatches();
-    for(size_t iMP=0; iMP<vpAllMapPoints.size(); iMP++)
-    {
-        if(vpAllMapPoints[iMP])
+        pNewMA->AddObservation(pKFini,i);
+        pKFini->AddMapAruco(pNewMA,i);
+        mpMap->AddMapAruco(pNewMA);
+        mInitialFrame.mvpMapArucos[i]=pNewMA;
+        for(size_t j=0; j<mCurrentFrame.NA; j++)
         {
-            MapPoint* pMP = vpAllMapPoints[iMP];
-            pMP->SetWorldPos(pMP->GetWorldPos()*invMedianDepth);
+            int jd = mCurrentFrame.mvMarkers[j].id;
+            if(jd == xM.id) {
+                pNewMA->AddObservation(pKFcur,j);
+                pKFcur->AddMapAruco(pNewMA,j);
+                mCurrentFrame.mvpMapArucos[j]=pNewMA;
+            }
+        }
+        // cout << "In CreateInitialMapMonocular()... 1.pKFini;"<<endl;
+    }
+    // 2.pKFcur可能会有重复的Aruco id号
+    // cout << "out...  1.pKFini;"<<endl;
+    for(size_t i=0; i<mCurrentFrame.NA; i++)
+    {
+        int cid = mCurrentFrame.mvMarkers[i].id;
+        // cout << "In second for"<<endl;
+        if( find(viId.begin(), viId.end(), cid)==viId.end() )
+        {
+            // cout << "In CreateInitialMapMonocular()... 2.pKFcur."<<endl;
+            // 即Aruco的id没有与mInitialFrame中重复，则add
+            aruco::Marker xM = mCurrentFrame.mvMarkers[i];
+            MapAruco* pNewMA = new MapAruco(xM, pKFcur, mpMap, s);
+            pNewMA->SetRtwm(pKFcur->GetRotation().t(), pKFcur->GetCameraCenter());
+
+            pNewMA->AddObservation(pKFcur,i);
+            pKFcur->AddMapAruco(pNewMA,i);
+            mpMap->AddMapAruco(pNewMA); 
+            mCurrentFrame.mvpMapArucos[i]=pNewMA;
         }
     }
 
-    mpLocalMapper->InsertKeyFrame(pKFini);
-    mpLocalMapper->InsertKeyFrame(pKFcur);
+    cout<<"before GBA"<<endl;
+    Optimizer::GlobalBundleAdjustemnt(mpMap,20); //* 没想到这里突然来了个全局BA   
 
+    mpLocalMapper->InsertKeyFrame(pKFini);
     mCurrentFrame.SetPose(pKFcur->GetPose());
     mnLastKeyFrameId=mCurrentFrame.mnId;
     mpLastKeyFrame = pKFcur;
@@ -774,6 +882,21 @@ void Tracking::CreateInitialMapMonocular()
     mpMap->mvpKeyFrameOrigins.push_back(pKFini);
 
     mState=OK;
+}
+
+void Tracking::Triangulate(cv::Point2f &kp1, cv::Point2f &kp2, cv::Mat &P1, cv::Mat &P2, cv::Mat &x3D)
+{
+    cv::Mat A(4,4,CV_32F);
+
+    A.row(0) = kp1.x*P1.row(2)-P1.row(0);
+    A.row(1) = kp1.y*P1.row(2)-P1.row(1);
+    A.row(2) = kp2.x*P2.row(2)-P2.row(0);
+    A.row(3) = kp2.y*P2.row(2)-P2.row(1);
+
+    cv::Mat u,w,vt;
+    cv::SVD::compute(A,w,u,vt,cv::SVD::MODIFY_A| cv::SVD::FULL_UV);
+    x3D = vt.row(3).t();
+    x3D = x3D.rowRange(0,3)/x3D.at<float>(3);
 }
 
 void Tracking::CheckReplacedInLastFrame()
@@ -806,7 +929,6 @@ void Tracking::CheckArucoID()
             int iid = mCurrentFrame.mvMarkers[i].id;
             if(aid == iid)
             {
-                cout<<"----iid:"<<endl<<"\t"<<iid<<endl;
                 mCurrentFrame.mvpMapArucos[i] = pMA;
             }
         }
@@ -825,27 +947,37 @@ bool Tracking::TrackReferenceKeyFrame()
     vector<MapPoint*> vpMapPointMatches;
 
     int nmatches = matcher.SearchByBoW(mpReferenceKF,mCurrentFrame,vpMapPointMatches);
+    cout<<"In TrackRefernceKeyFrame(), nmarches = "<<nmatches<<endl;
 
     // Add by liujiamin
     // TODO: make frame.mvpMapArucos[idx] have value
+    // cout<<"in TrackReferenceKeyFrame, before CheckArucoID(),,,"<<endl;
     CheckArucoID();
+    // cout<<"in TrackReferenceKeyFrame, after CheckArucoID(),,,"<<endl;
 
-    if(nmatches<15)
+    if(nmatches<10) // 15
         return false;
 
     mCurrentFrame.mvpMapPoints = vpMapPointMatches;
     mCurrentFrame.SetPose(mLastFrame.mTcw);
 
+    // cout<<"in TrackReferenceKeyFrame, before Optimizer::PoseOptimization(&mCurrentFrame);,,,"<<endl;
     Optimizer::PoseOptimization(&mCurrentFrame);
+    // cout<<"in TrackReferenceKeyFrame, after Optimizer::PoseOptimization(&mCurrentFrame);,,,"<<endl;
 
     // Discard outliers
     int nmatchesMap = 0;
+    int nmvpMP=0;
+    int nout=0;
+    int nNull=0;
     for(int i =0; i<mCurrentFrame.N; i++)
     {
         if(mCurrentFrame.mvpMapPoints[i])
         {
+            nmvpMP++;
             if(mCurrentFrame.mvbOutlier[i])
             {
+                nout++;
                 MapPoint* pMP = mCurrentFrame.mvpMapPoints[i];
 
                 mCurrentFrame.mvpMapPoints[i]=static_cast<MapPoint*>(NULL);
@@ -854,12 +986,20 @@ bool Tracking::TrackReferenceKeyFrame()
                 pMP->mnLastFrameSeen = mCurrentFrame.mnId;
                 nmatches--;
             }
-            else if(mCurrentFrame.mvpMapPoints[i]->Observations()>0)
+            else if(mCurrentFrame.mvpMapPoints[i]->Observations()>0){
                 nmatchesMap++;
+            } else
+            {
+                nNull++;
+            }
+            
         }
     }
-
-    return nmatchesMap>=10;
+    cout<<"in TrackReferenceKeyFrame nmvpMP = "<<nmvpMP<<endl;
+    cout<<"in TrackReferenceKeyFrame nout = "<<nout<<endl;
+    cout<<"in TrackReferenceKeyFrame nNull = "<<nNull<<endl;
+    cout<<"in TrackReferenceKeyFrame nmatchesMap = "<<nmatchesMap<<endl;
+    return nmatchesMap>=8; //10
 }
 
 void Tracking::UpdateLastFrame()
@@ -997,47 +1137,156 @@ bool Tracking::TrackWithMotionModel()
 
 bool Tracking::TrackByAruco()
 {
-    cout <<"Track By Aruco ======="<<endl;
+    // cout <<"Track By Aruco ======="<<endl;
     // Compute Bag of Words vector
-    mCurrentFrame.ComputeBoW();
+    // mCurrentFrame.ComputeBoW();
 
-    // We perform first an ORB matching with the reference keyframe
-    // If enough matches are found we setup a PnP solver
-    ORBmatcher matcher(0.7,true);
-    vector<MapPoint*> vpMapPointMatches;
+    // // We perform first an ORB matching with the reference keyframe
+    // // If enough matches are found we setup a PnP solver
+    // ORBmatcher matcher(0.7,true);
+    // vector<MapPoint*> vpMapPointMatches;
 
-    int nmatches = matcher.SearchByBoW(mpReferenceKF,mCurrentFrame,vpMapPointMatches);
+    // int nmatches = matcher.SearchByBoW(mpReferenceKF,mCurrentFrame,vpMapPointMatches);
+    
+    // if(nmatches<15)
+    //     return false;
 
-    if(nmatches<15)
-        return false;
+    // mCurrentFrame.mvpMapPoints = vpMapPointMatches;
 
-    mCurrentFrame.mvpMapPoints = vpMapPointMatches;
+    ORBmatcher matcher(0.9,true);
+    UpdateLastFrame();
+    CheckArucoID();
 
-    // int numAruco = mCurrentFrame.mvMarkers.size();
-    int CurArucoId = mCurrentFrame.mvMarkers[0].id;
-    int LastArucoId = -1;
-    for(int i=0; i<mLastFrame.mvMarkers.size(); i++)
-    {
-        if(mLastFrame.mvMarkers[i].id = CurArucoId)
-        {
-            LastArucoId = i;
-            break;
+    // TODO get best R,t by Aruco
+    // step 1: find Aruco in both last and current frame
+    vector<pair<int,int>> vp;
+    for(size_t i=0; i<mLastFrame.NA; i++) {
+        for(size_t j=0; j<mCurrentFrame.NA; j++) {
+            if(mLastFrame.mvMarkers[i].id == mCurrentFrame.mvMarkers[j].id) {
+                vp.push_back(make_pair(i,j));
+                continue;
+            }
         }
     }
-    if(LastArucoId = -1)
-        return false;
-    
-    cv::Mat Tl, Tc;
-    cv::Mat Rlast = mLastFrame.mvMarkers[LastArucoId].Rvec;
-    cv::Rodrigues(Rlast, Tl.rowRange(0,3).colRange(0,3));
-    Tl.rowRange(0,3).col(3) = mLastFrame.mvMarkers[LastArucoId].Tvec;
-    cv::Mat Rcur = mCurrentFrame.mvMarkers[0].Rvec.clone();
-    cv::Rodrigues(Rcur, Tc.rowRange(0,3).colRange(0,3));
-    Tc.rowRange(0,3).col(3) = mCurrentFrame.mvMarkers[0].Tvec.clone();
-    
-    cv::Mat Ttmp = Tc * Tl.t();
+    // step 2: store all R,t computed by Aruco
+    vector<cv::Mat> vmR21A;
+    vector<cv::Mat> vmt21A;
+    vector<aruco::Marker> vm1, vm2;
+    for(size_t t=0; t<vp.size(); t++)
+    {
+        vm1.push_back(mLastFrame.mvMarkers[vp[t].first]);
+        vm2.push_back(mCurrentFrame.mvMarkers[vp[t].second]);
+    }
+    int numA = vp.size();
+    vector<cv::Mat> vr1;
+    for(int i=0; i<numA; i++)
+    {
+        aruco::Marker pam1 = vm1[i];
+        aruco::Marker pam2 = vm2[i];
+        // cout<<i<<" id = "<<pam1.id<<endl;
+        cv::Mat rr1,rr2;
+        cv::Rodrigues(pam1.Rvec, rr1);
+        cv::Rodrigues(pam2.Rvec, rr2);
+        vmR21A.push_back(rr2*rr1.t() );
+        vmt21A.push_back(-rr2*rr1.t()*pam1.Tvec+pam2.Tvec);
+        vr1.push_back(rr1);
+    }
+    // step 2.2: store 3D and 2D points which need to compute projective error
+    vector<cv::Mat> a3d1;
+    a3d1.resize(4*numA);
+    vector<cv::Mat> a2d1, a2d2;
+    a2d1.resize(4*numA);
+    a2d2.resize(4*numA);
+    for(int i=0; i<numA; i++)
+    {
+        //! 要改成去畸变的坐标。
+        aruco::Marker pam1 = vm1[i];
+        aruco::Marker pam2 = vm2[i];
+        double length = 0.165;
+        int n1 = vp[i].first;  // mLastFrame
+        int n2 = vp[i].second; // mCurrentFrame
 
-    mCurrentFrame.SetPose(Ttmp * mLastFrame.mTcw );
+        // according 
+        cv::Mat c0=(cv::Mat_<float>(3,1)<<-length/2, length/2, 0);
+        cv::Mat c1=(cv::Mat_<float>(3,1)<< length/2, length/2, 0);
+        cv::Mat c2=(cv::Mat_<float>(3,1)<< length/2,-length/2, 0);
+        cv::Mat c3=(cv::Mat_<float>(3,1)<<-length/2,-length/2, 0);
+        a3d1[4*i ] = vr1[i]*c0+pam1.Tvec;
+        a3d1[4*i+1] = vr1[i]*c1+pam1.Tvec;
+        a3d1[4*i+2] = vr1[i]*c2+pam1.Tvec;
+        a3d1[4*i+3] = vr1[i]*c3+pam1.Tvec;
+
+        a2d1[4*i  ] = (cv::Mat_<float>(2,1)<<mLastFrame.mvArucoUn[4*n1].x,   mLastFrame.mvArucoUn[4*n1].y);
+        a2d1[4*i+1] = (cv::Mat_<float>(2,1)<<mLastFrame.mvArucoUn[4*n1+1].x, mLastFrame.mvArucoUn[4*n1+1].y);
+        a2d1[4*i+2] = (cv::Mat_<float>(2,1)<<mLastFrame.mvArucoUn[4*n1+2].x, mLastFrame.mvArucoUn[4*n1+2].y);
+        a2d1[4*i+3] = (cv::Mat_<float>(2,1)<<mLastFrame.mvArucoUn[4*n1+3].x, mLastFrame.mvArucoUn[4*n1+3].y);
+
+        a2d2[4*i  ] = (cv::Mat_<float>(2,1)<<mCurrentFrame.mvArucoUn[4*n2].x,   mCurrentFrame.mvArucoUn[4*n2].y);
+        a2d2[4*i+1] = (cv::Mat_<float>(2,1)<<mCurrentFrame.mvArucoUn[4*n2+1].x, mCurrentFrame.mvArucoUn[4*n2+1].y);
+        a2d2[4*i+2] = (cv::Mat_<float>(2,1)<<mCurrentFrame.mvArucoUn[4*n2+2].x, mCurrentFrame.mvArucoUn[4*n2+2].y);
+        a2d2[4*i+3] = (cv::Mat_<float>(2,1)<<mCurrentFrame.mvArucoUn[4*n2+3].x, mCurrentFrame.mvArucoUn[4*n2+3].y);
+    }
+    // step 2.3: compute projective error
+    const float fx = mK.at<float>(0,0);
+    const float fy = mK.at<float>(1,1);
+    const float cx = mK.at<float>(0,2);
+    const float cy = mK.at<float>(1,2);
+    double err=0;
+    double minErr = 1000000;
+    int bestA = -1;
+    for(int i=0; i<numA; i++)
+    {
+        double error1=0, error2=0;
+        for(int k=0; k<4*numA; k++)
+        {
+            double ex1 = ((a3d1[k].at<float>(0)/a3d1[k].at<float>(2))*fx+cx) - a2d1[k].at<float>(0);
+            double ey1 = ((a3d1[k].at<float>(1)/a3d1[k].at<float>(2))*fy+cy) - a2d1[k].at<float>(1);
+            // cout<<sqrt(ex1*ex1 + ey1*ey1)<<" ";
+            error1 += ex1*ex1 + ey1*ey1;
+
+            cv::Mat a3d2 = vmR21A[i]*a3d1[k] + vmt21A[i];
+            double ex2 = ((a3d2.at<float>(0)/a3d2.at<float>(2))*fx+cx) - a2d2[k].at<float>(0);
+            double ey2 = ((a3d2.at<float>(1)/a3d2.at<float>(2))*fy+cy) - a2d2[k].at<float>(1);
+            error2 += ex2*ex2 + ey2*ey2; 
+            // cout<<sqrt(ex2*ex2 + ey2*ey2)<<"\n";
+        }
+        err = error1 + error2;
+        if(err < minErr){
+            bestA = i;
+            minErr = err;
+        }
+    }
+
+    // setp 3: set pose
+    if(bestA != -1){
+        // T21 * mLastFrame.mTcw
+        cv::Mat T21 = cv::Mat::eye(4,4,CV_32F);
+        vmR21A[bestA].copyTo(T21.rowRange(0,3).colRange(0,3) );
+        vmt21A[bestA].copyTo(T21.rowRange(0,3).col(3) );
+        mCurrentFrame.SetPose( T21 * mLastFrame.mTcw );
+    }
+    else {
+        mCurrentFrame.SetPose( mLastFrame.mTcw );
+    }
+
+    fill(mCurrentFrame.mvpMapPoints.begin(),mCurrentFrame.mvpMapPoints.end(),static_cast<MapPoint*>(NULL));
+    int th;
+    if(mSensor!=System::STEREO)
+        th=15;
+    else
+        th=7;
+    int nmatches = matcher.SearchByProjection(mCurrentFrame,mLastFrame,th,mSensor==System::MONOCULAR);
+
+    // If few matches, uses a wider window search
+    // 如果跟踪的点少，则扩大搜索半径再来一次
+    if(nmatches<20)
+    {
+        fill(mCurrentFrame.mvpMapPoints.begin(),mCurrentFrame.mvpMapPoints.end(),static_cast<MapPoint*>(NULL));
+        nmatches = matcher.SearchByProjection(mCurrentFrame,mLastFrame,2*th,mSensor==System::MONOCULAR); // 2*th
+    }
+
+    if(nmatches<20)
+        return false;
 
     Optimizer::PoseOptimization(&mCurrentFrame);
 
@@ -1123,6 +1372,14 @@ bool Tracking::NeedNewKeyFrame()
     // If Local Mapping is freezed by a Loop Closure do not insert keyframes
     if(mpLocalMapper->isStopped() || mpLocalMapper->stopRequested())
         return false;
+
+    // TODO: If see new Aruco, return true
+    for(size_t i=0; i<mCurrentFrame.NA; i++)
+    {
+        MapAruco* pMA = mCurrentFrame.mvpMapArucos[i];
+        if(!pMA)
+            return true;
+    }
 
     const int nKFs = mpMap->KeyFramesInMap();
 
@@ -1274,7 +1531,55 @@ void Tracking::CreateNewKeyFrame()
     }
 
     //* it is about adding Aruco to the map
-    // TODO: adding Aruco to the map
+    // TODO: adding Aruco to the map --- MONOCULAR
+    if(mSensor==System::MONOCULAR)
+    {
+        int na = mCurrentFrame.NA;
+        for(size_t i=0; i<na; i++)
+        {
+            bool bCreateNewMapAruco = false;
+            MapAruco* pMA = mCurrentFrame.mvpMapArucos[i];
+            //* 详细注解见STEREO部分
+            if(!pMA) 
+            {
+                cout<<"pMA is NULL"<<endl;
+                bCreateNewMapAruco = true;
+            }
+            else if(pMA->Observations()<1)
+            {
+                cout<<"pMA->Observations() < 1"<<endl;
+                bCreateNewMapAruco = true;
+            }
+            aruco::Marker xM = mCurrentFrame.mvMarkers[i];
+            float s=0.165; // SPM Datasets is 0.165
+            if(bCreateNewMapAruco)
+            {
+                MapAruco* pNewMA = new MapAruco(xM, pKF, mpMap, s);
+                cv::Mat r=pKF->GetRotation().t();
+                cv::Mat t=pKF->GetCameraCenter();
+                // cout<<r<<endl;
+                // cout<<t<<endl;
+                pNewMA->SetRtwm(r, t);
+                cv::Mat T_get = pNewMA->GetTwm();
+                cout<<"T_get = "<<T_get<<endl;
+                // cv::Mat m0 = pNewMA->GetPosInWorld(0);
+                // cv::Mat m1 = pNewMA->GetPosInWorld(1);
+                // cv::Mat m2 = pNewMA->GetPosInWorld(2);
+                // cv::Mat m3 = pNewMA->GetPosInWorld(3);
+                // cout<<"pNewMA->id="<<pNewMA->GetMapArucoID()<<endl;
+                // cout<<"m1-m0="<<cv::norm(m1-m0)<<endl;
+                // cout<<"m2-01="<<cv::norm(m2-m1)<<endl;
+                // cout<<"m3-m2="<<cv::norm(m3-m2)<<endl;
+                // cout<<"m0-m3="<<cv::norm(m0-m3)<<endl;
+
+                pNewMA->AddObservation(pKF, i);
+                pKF->AddMapAruco(pNewMA, i);
+                mpMap->AddMapAruco(pNewMA);
+                cout<<"-----ckf-------New Aruco's ID: "<<xM.id<<endl;
+            }
+        }
+    }
+    // TODO: adding Aruco to the map --- STEREO
     if(mSensor==System::STEREO)
     {
         cout<<"In CreateNewKeyFrame(), and now is adding new aruco to the map!"<<endl;

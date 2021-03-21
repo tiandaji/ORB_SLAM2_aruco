@@ -1,6 +1,17 @@
 # Modified
 1. Add aruco in "Thirdparty"
-2. I try to add aruco to help localization. And it added in the function "Optimizer::PoseOptimization(&mCurrentFrame)". It works now, but there is very little help.
+2. Add folder "g2oAddition". It contains a class named 'EdgeMarker', which is used for constraint the reprojection error of Marker(Aruco).
+3. It can draw the Aruco detected by the thirdparty.
+4. It also can draw the 3d mappoints of Aruco computed by ORB-SLAM methods.
+5. In the monocular map initialization, it adds a function that use Aruco pose to initialize.
+6. It provides a way to track by Aruco.
+7. In class Optimizer, Aruco constraint add in function: PoseOptimization, LocalBundleAdjustment, GlobalBundleAdjustemnt.
+
+# Weaknesses
+1. It cannot align Aruco pose detected by thirdparty and computed by ORB-SLAM.
+2. Loop closure module is not complete.
+
+
 
 =======================================================
 

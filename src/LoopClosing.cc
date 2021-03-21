@@ -111,6 +111,11 @@ bool LoopClosing::DetectLoop()
         mlpLoopKeyFrameQueue.pop_front();
         // Avoid that a keyframe can be erased while it is being process by this thread
         mpCurrentKF->SetNotErase();
+
+        //! 在此处先单独保存mpCurrentKF的Aruco信息，在DetectLoop()环节的最后将mpCurrentKF的Aruco信息保存
+        //* mpCurrentKF应该保存好了Aruco信息
+        //* mpCurrentKF->mvMarkers
+
     }
 
     //If the map contains less than 10 KF or less than 10 KF have passed from last loop detection
@@ -120,6 +125,24 @@ bool LoopClosing::DetectLoop()
         mpCurrentKF->SetErase();
         return false;
     }
+
+    vector<int> CurArucoID;
+    bool LoopByAruco = false;
+    std::set<int> d;
+    for(size_t i=0; i<mpCurrentKF->mvMarkers.size(); i++)
+    {
+        int iid = mpCurrentKF->mvMarkers[i].id;
+        // 两个set相减 msiArucoAllID - msiArucoTrackID
+        set_difference(msiArucoAllID.begin(), msiArucoAllID.end(), msiArucoTrackID.begin(), msiArucoTrackID.end(), insert_iterator<set<int>>(d,d.begin()));
+        for(auto j:d)
+        {
+            if(iid == j){
+                LoopByAruco = true;
+                cout << iid << "------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------"<<endl;
+            }
+        }
+    }
+
 
     // Compute reference BoW similarity score
     // This is the lowest score to a connected keyframe in the covisibility graph
@@ -213,6 +236,25 @@ bool LoopClosing::DetectLoop()
     // Update Covisibility Consistent Groups
     mvConsistentGroups = vCurrentConsistentGroups;
 
+    //! 更新mpCurrentKF的Aruco信息
+    //! 同时应该更新共视图里面的信息
+    // update msiArucoAllID
+    //! 要剔除之前存的Aruco id号 msiArucoTrackID.clear();
+    msiArucoTrackID.clear();
+    for(size_t i=0; i<mpCurrentKF->mvMarkers.size(); i++)
+    {
+        msiArucoAllID.insert(mpCurrentKF->mvMarkers[i].id); 
+        msiArucoTrackID.insert(mpCurrentKF->mvMarkers[i].id);
+    }
+    // update msiArucoTrackID 
+    vector<KeyFrame*> vpLocalKeyFrames =mpCurrentKF->GetVectorCovisibleKeyFrames();
+    for(size_t i=0; i<vpLocalKeyFrames.size(); i++)
+    {
+        for(size_t j=0; j<vpLocalKeyFrames[i]->mvMarkers.size(); j++)
+        {
+            msiArucoTrackID.insert(vpLocalKeyFrames[i]->mvMarkers[j].id);
+        }
+    }
 
     // Add Current Keyframe to database
     mpKeyFrameDB->add(mpCurrentKF);
@@ -224,6 +266,7 @@ bool LoopClosing::DetectLoop()
     }
     else
     {
+        cout<<"Detect Loop  ---------------------------------------------------- "<<endl;
         return true;
     }
 

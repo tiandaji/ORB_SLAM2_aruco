@@ -27,6 +27,7 @@
 #include "LoopClosing.h"
 #include "Frame.h"
 #include "MapAruco.h"
+#include "../g2oAddition/EdgeMarker.h"
 
 #include "Thirdparty/g2o/g2o/types/types_seven_dof_expmap.h"
 
@@ -39,6 +40,7 @@ class Optimizer
 {
 public:
     void static BundleAdjustment(const std::vector<KeyFrame*> &vpKF, const std::vector<MapPoint*> &vpMP,
+                                 const vector<MapAruco *> &vpMA,
                                  int nIterations = 5, bool *pbStopFlag=NULL, const unsigned long nLoopKF=0,
                                  const bool bRobust = true);
     void static GlobalBundleAdjustemnt(Map* pMap, int nIterations=5, bool *pbStopFlag=NULL,

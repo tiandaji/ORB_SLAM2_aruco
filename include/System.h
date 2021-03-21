@@ -122,6 +122,9 @@ public:
     std::vector<MapPoint*> GetTrackedMapPoints();
     std::vector<cv::KeyPoint> GetTrackedKeyPointsUn();
 
+    //* Add by liujiamin 
+    void ComputeArucoInMap();
+
 private:
 
     // Input sensor

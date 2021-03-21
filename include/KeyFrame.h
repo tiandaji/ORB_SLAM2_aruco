@@ -125,6 +125,10 @@ public:
         return pKF1->mnId<pKF2->mnId;
     }
 
+    //* Add by liujiamin
+    void CorrelateMapArucoMapPoint();
+    std::vector<size_t> GetFeaturesInAruco(int numi);
+    void AddArucoMapPoint(MapPoint* pAMP, const size_t &idx);
 
     // The following variables are accesed from only 1 thread or never change (no mutex needed).
 public:
@@ -179,6 +183,7 @@ public:
     std::vector<std::vector<float> > mvuArucoRight;
     const cv::Mat mDescriptors;
     std::vector<aruco::Marker> mvMarkers;
+    std::vector<cv::Point2f> mvArucoUn;
 
     //BoW
     DBoW2::BowVector mBowVec;
@@ -218,6 +223,7 @@ protected:
 
     // Add by liujiamin
     std::vector<MapAruco*> mvpMapArucos;
+    std::vector<MapPoint*> mvpArucoMPs;
 
     // BoW
     KeyFrameDatabase* mpKeyFrameDB;

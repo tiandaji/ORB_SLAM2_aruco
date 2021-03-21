@@ -120,6 +120,9 @@ public:
     static float invfy;
     cv::Mat mDistCoef;
 
+    // Mono scale
+    float fscale;
+
     // Stereo baseline multiplied by fx.
     float mbf;
 
@@ -159,9 +162,12 @@ public:
     std::vector<MapPoint*> mvpMapPoints;
     // Add by liujiamin
     std::vector<MapAruco*> mvpMapArucos;
+    std::vector<MapPoint*> mvpArucoMPs;
+    std::vector<cv::Point2f> mvArucoUn;
 
     // Flag to identify outlier associations.
     std::vector<bool> mvbOutlier;
+    std::vector<bool> mvbArucoOutlier;
 
     // Keypoints are assigned to cells in a grid to reduce matching complexity when projecting MapPoints.
     static float mfGridElementWidthInv;
@@ -204,6 +210,8 @@ private:
     // Only for the RGB-D case. Stereo must be already rectified!
     // (called in the constructor).
     void UndistortKeyPoints();
+    //* 
+    void UndistortArucoCorners();
 
     // Computes image bounds for the undistorted image (called in the constructor).
     void ComputeImageBounds(const cv::Mat &imLeft);

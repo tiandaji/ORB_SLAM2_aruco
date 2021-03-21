@@ -53,6 +53,7 @@ public:
 
     void AddObservation(KeyFrame* pKF,size_t idx);
     void EraseObservation(KeyFrame* pKF);
+    void AddArucoObservation(KeyFrame*pKF,size_t idx);
 
     int GetIndexInKeyFrame(KeyFrame* pKF);
     bool IsInKeyFrame(KeyFrame* pKF);
@@ -87,6 +88,8 @@ public:
     long int mnFirstKFid;
     long int mnFirstFrame;
     int nObs;
+    int nArucoObs;
+    bool forflag;
 
     // Variables used by the tracking
     float mTrackProjX;
@@ -119,6 +122,8 @@ protected:
 
      // Keyframes observing the point and associated index in keyframe
      std::map<KeyFrame*,size_t> mObservations;
+     //* About Aruco
+     std::map<KeyFrame*,size_t> mArucoObservations;
 
      // Mean viewing direction
      cv::Mat mNormalVector;

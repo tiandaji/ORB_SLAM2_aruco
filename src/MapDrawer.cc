@@ -41,43 +41,109 @@ MapDrawer::MapDrawer(Map* pMap, const string &strSettingPath):mpMap(pMap)
 
 }
 
-void MapDrawer::DrawMapPoints()
+void MapDrawer::DrawMapPoints(std::map<int, vector<cv::Point3f>> mmAruMPs)
 {
     const vector<MapPoint*> &vpMPs = mpMap->GetAllMapPoints();
     const vector<MapPoint*> &vpRefMPs = mpMap->GetReferenceMapPoints();
+    const vector<MapAruco*> &vpMAs = mpMap->GetAllMapArucos();
 
     set<MapPoint*> spRefMPs(vpRefMPs.begin(), vpRefMPs.end());
 
     if(vpMPs.empty())
         return;
 
-    glPointSize(mPointSize);
-    glBegin(GL_POINTS);
-    glColor3f(0.0,0.0,0.0);
+    // glPointSize(mPointSize);
+    // glBegin(GL_POINTS);
+    // glColor3f(0.0,0.0,0.0);
 
     for(size_t i=0, iend=vpMPs.size(); i<iend;i++)
     {
         if(vpMPs[i]->isBad() || spRefMPs.count(vpMPs[i]))
             continue;
         cv::Mat pos = vpMPs[i]->GetWorldPos();
-        glVertex3f(pos.at<float>(0),pos.at<float>(1),pos.at<float>(2));
+        if(vpMPs[i]->forflag == 1) {
+            glPointSize(mPointSize*4);
+            glBegin(GL_POINTS);
+            glColor3f(0.0, 1.0, 0.0);
+            glVertex3f(pos.at<float>(0),pos.at<float>(1),pos.at<float>(2));
+            glEnd();
+        }
+        else{
+            glPointSize(mPointSize);
+            glBegin(GL_POINTS);
+            glColor3f(0.0,0.0,0.0);
+            glVertex3f(pos.at<float>(0),pos.at<float>(1),pos.at<float>(2));
+            glEnd();
+        }
+        // glVertex3f(pos.at<float>(0),pos.at<float>(1),pos.at<float>(2));
     }
-    glEnd();
-
-    glPointSize(mPointSize);
-    glBegin(GL_POINTS);
-    glColor3f(1.0,0.0,0.0);
+    // glEnd();
 
     for(set<MapPoint*>::iterator sit=spRefMPs.begin(), send=spRefMPs.end(); sit!=send; sit++)
     {
         if((*sit)->isBad())
             continue;
         cv::Mat pos = (*sit)->GetWorldPos();
-        glVertex3f(pos.at<float>(0),pos.at<float>(1),pos.at<float>(2));
-
+        if((*sit)->forflag == 1) {
+            glPointSize(mPointSize*4);
+            glBegin(GL_POINTS);
+            glColor3f(0.0, 1.0, 0.0);
+            glVertex3f(pos.at<float>(0),pos.at<float>(1),pos.at<float>(2));
+            glEnd();
+        } else {
+            glPointSize(mPointSize);
+            glBegin(GL_POINTS);
+            glColor3f(1.0,0.0,0.0);
+            glVertex3f(pos.at<float>(0),pos.at<float>(1),pos.at<float>(2));
+            glEnd();
+        }
+        
     }
+    
+    // cout<<"vpMAs.size() = "<<vpMAs.size()<<endl;
+    for(size_t i=0; i<vpMAs.size(); i++)
+    {
+        if(vpMAs[i])
+        {
+            // cout<<"vpMAs[i]->GetMapArucoID() = "<<vpMAs[i]->GetMapArucoID()<<endl;
+            glLineWidth(mKeyFrameLineWidth);
+            glColor3f(0.0f,0.5f,0.5f);
+            glBegin(GL_LINES);
 
-    glEnd();
+            cv::Mat m0 = vpMAs[i]->GetPosInWorld(0);
+            cv::Mat m1 = vpMAs[i]->GetPosInWorld(1);
+            cv::Mat m2 = vpMAs[i]->GetPosInWorld(2);
+            cv::Mat m3 = vpMAs[i]->GetPosInWorld(3);
+
+            glVertex3f(m0.at<float>(0),m0.at<float>(1),m0.at<float>(2));
+            glVertex3f(m1.at<float>(0),m1.at<float>(1),m1.at<float>(2));
+
+            glVertex3f(m1.at<float>(0),m1.at<float>(1),m1.at<float>(2));
+            glVertex3f(m2.at<float>(0),m2.at<float>(1),m2.at<float>(2));
+
+            glVertex3f(m2.at<float>(0),m2.at<float>(1),m2.at<float>(2));
+            glVertex3f(m3.at<float>(0),m3.at<float>(1),m3.at<float>(2));
+        
+            glVertex3f(m3.at<float>(0),m3.at<float>(1),m3.at<float>(2));
+            glVertex3f(m0.at<float>(0),m0.at<float>(1),m0.at<float>(2));
+
+            glEnd();
+        }
+        
+    }
+    int n = mmAruMPs.size();
+    for(map<int, vector<cv::Point3f>>::iterator it=mmAruMPs.begin(); it!=mmAruMPs.end(); it++ )
+    {
+        vector<cv::Point3f> vpAruco = it->second;
+        glLineWidth(mKeyFrameLineWidth*1.3);
+        glColor4f(0.0f,0.0f,0.9f, 0.5f);
+        glBegin(GL_POLYGON);
+        glVertex3f(vpAruco[0].x,vpAruco[0].y,vpAruco[0].z);
+        glVertex3f(vpAruco[1].x,vpAruco[1].y,vpAruco[1].z);
+        glVertex3f(vpAruco[2].x,vpAruco[2].y,vpAruco[2].z);
+        glVertex3f(vpAruco[3].x,vpAruco[3].y,vpAruco[3].z);
+        glEnd();
+    }
 }
 
 void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph)
@@ -122,6 +188,37 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph)
 
             glVertex3f(-w,-h,z);
             glVertex3f(w,-h,z);
+
+            // for(size_t j=0; j<pKF->NA; j++)
+            // {
+            //     // for(size_t k=0; k<4; k++)
+            //     // {
+            //         cv::Mat rvector=pKF->mvMarkers[j].Rvec;
+            //         cv::Mat tvector=pKF->mvMarkers[j].Tvec;
+            //         cv::Mat Rmatrix;
+            //         cv::Rodrigues(rvector, Rmatrix);
+            //         float mLength = 0.165;
+            //         cv::Mat c0=(cv::Mat_<float>(3,1)<< mLength/2, -mLength/2, 0);
+            //         cv::Mat c1=(cv::Mat_<float>(3,1)<< mLength/2,  mLength/2, 0);
+            //         cv::Mat c2=(cv::Mat_<float>(3,1)<<-mLength/2,  mLength/2, 0);
+            //         cv::Mat c3=(cv::Mat_<float>(3,1)<<-mLength/2, -mLength/2, 0);
+            //         c0 = Rmatrix * c0 + tvector;
+            //         c1 = Rmatrix * c1 + tvector;
+            //         c2 = Rmatrix * c2 + tvector;
+            //         c3 = Rmatrix * c3 + tvector;
+
+            //         glVertex3f(c0.at<float>(0),c0.at<float>(1),c0.at<float>(2));
+            //         glVertex3f(c1.at<float>(0),c1.at<float>(1),c1.at<float>(2));
+            //         glVertex3f(c1.at<float>(0),c1.at<float>(1),c1.at<float>(2));
+            //         glVertex3f(c2.at<float>(0),c2.at<float>(1),c2.at<float>(2));
+            //         glVertex3f(c2.at<float>(0),c2.at<float>(1),c2.at<float>(2));
+            //         glVertex3f(c3.at<float>(0),c3.at<float>(1),c3.at<float>(2));
+            //         glVertex3f(c3.at<float>(0),c3.at<float>(1),c3.at<float>(2));
+            //         glVertex3f(c0.at<float>(0),c0.at<float>(1),c0.at<float>(2));
+
+            //     // }
+            // }
+
             glEnd();
 
             glPopMatrix();

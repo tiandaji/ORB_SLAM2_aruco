@@ -69,6 +69,9 @@ void LocalMapping::Run()
             // Triangulate new MapPoints
             CreateNewMapPoints();
 
+            //* Create MapPoints about aurco
+            CreateArucoMapPoints();
+
             if(!CheckNewKeyFrames())
             {
                 // Find more matches in neighbor keyframes and fuse point duplications
@@ -452,6 +455,125 @@ void LocalMapping::CreateNewMapPoints()
             nnew++;
         }
     }
+}
+
+void LocalMapping::CreateArucoMapPoints()
+{
+    // step 1: Get All aruco need to be created
+    const int NA = mpCurrentKeyFrame->NA;
+
+    // step 2: For each aruco:
+    // 1) Find keypoints in aruco; 2)fit a plane; 3)aruco 4 cornors in this plane
+    for(size_t i=0; i<NA; i++)
+    {
+        vector<size_t> vindices = mpCurrentKeyFrame->GetFeaturesInAruco(i);
+        //假设要求Aruco内有5个点。
+        if(vindices.size()<5) continue; // <5,则算下一个Aruco
+
+        vector<Eigen::Vector3d> plane_pts;
+        cv::Mat Rcw = mpCurrentKeyFrame->GetRotation();
+        cv::Mat tcw = mpCurrentKeyFrame->GetTranslation();
+        for(size_t j=0; j<vindices.size(); j++)
+        {
+            MapPoint* pMP = mpCurrentKeyFrame->GetMapPoint(vindices[j]);
+            if(pMP) {
+                if(!pMP->isBad()) {
+                    pMP->forflag = 1;
+                    cv::Mat pw = pMP->GetWorldPos();
+                    cv::Mat pc = Rcw*pw + tcw; // 获得在当前关键帧下的坐标
+                    plane_pts.push_back(Eigen::Vector3d(pc.at<float>(0), pc.at<float>(1), pc.at<float>(2)));
+                }
+            }
+        }
+        if(plane_pts.size()<5) continue; // <5,则算下一个Aruco
+
+        map<int, vector<cv::Point3f>> &mAruMPs=mpTracker->mmAruMPs;
+        Eigen::Vector3d center;
+        Eigen::Vector4d plapram = PlaneFitting(plane_pts, center); 
+        const float &cx1 = mpCurrentKeyFrame->cx;
+        const float &cy1 = mpCurrentKeyFrame->cy;
+        const float &invfx1 = mpCurrentKeyFrame->invfx;
+        const float &invfy1 = mpCurrentKeyFrame->invfy;
+
+        // vector<cv::Mat> point;
+
+        int id = mpCurrentKeyFrame->mvMarkers[i].id;
+        // if(mAruMPs->count(id)){
+        //     mAruMPs[id].clear();
+        // }
+        vector<cv::Point3f> vp3;
+        
+        for(int k=0; k<4; k++) 
+        {
+            
+            //注意要用去畸变的值。
+            double um = mpCurrentKeyFrame->mvArucoUn[4*i+k].x;
+            double vm = mpCurrentKeyFrame->mvArucoUn[4*i+k].y;
+            double xzm = (um-cx1)*invfx1;
+            double yzm = (vm-cy1)*invfy1;
+            // 求 直线(0-二维码一角点)与拟合的二维码空间平面 角点，即要求lamda
+            // x = 0+lamda*x0
+            // y = 0+lamda*y0
+            // z = 0+lamda*1
+            double a=100*plapram[0], b=100*plapram[1], c=100*plapram[2];
+            double vpt = a*xzm+b*yzm+c;
+            // if(vpt<1e-6)
+            //     cout<<"vpt is bad!!!!!!!!!!!!!!!!!!"<<endl;
+            double lamda = (a*center[0] + b*center[1] + c*center[2])/vpt;
+            cv::Mat posm=(cv::Mat_<float>(3,1)<< lamda*xzm, lamda*yzm, lamda); // in camera reference
+            posm = Rcw.t()*posm - Rcw.t()*tcw; // in world reference
+            //! 存储到mpTracker->mmAruMPs
+            vp3.push_back(cv::Point3f(posm.at<float>(0), posm.at<float>(1), posm.at<float>(2) ));
+            
+            // point.push_back(posm);
+
+            // mpTracker->mvIniP3AD.push_back(cv::Point3f(posm.at<float>(0), posm.at<float>(1), posm.at<float>(2) ));
+            // cout<<posm<<endl;
+            // MapPoint* pNewMP = new MapPoint(posm, mpCurrentKeyFrame, mpMap);
+            // pNewMP->AddArucoObservation(mpCurrentKeyFrame, 4*idi+k);
+            // pNewMP->UpdateNormalAndDepth();
+            // mpMap->AddArucoMapPoint(pNewMP);
+            // mpMap->AddArucoMapPointsID(m.id);
+            // mpCurrentKeyFrame->AddArucoMapPoint(pNewMP, 4*idi+k);
+            // 是否要在tracking文件中，修改updatelastframe之类的函数来更新frame结构中的mvpArucoMPs
+
+        }
+        
+        cv::Point3f dd0 = vp3[1]-vp3[0];
+        cv::Point3f dd1 = vp3[2]-vp3[1];
+        cv::Point3f dd2 = vp3[3]-vp3[2];
+        cv::Point3f dd3 = vp3[0]-vp3[3];
+        double l0=cv::norm(dd0), l1=cv::norm(dd1), l2=cv::norm(dd2), l3=cv::norm(dd3);
+        double lmean = (l0+l1+l2+l3)/4;
+        double ll0=l0-lmean, ll1=l1-lmean, ll2=l2-lmean, ll3=l3-lmean;
+        if(abs(ll0)<0.01 && abs(ll1)<0.01 && abs(ll2)<0.01 && abs(ll3)<0.01){
+            cout<<l0<<" "<<l1<<" "<<l2<<" "<<l3<<endl;
+            mAruMPs[id] = vp3;
+        }
+        
+    }
+}
+
+Eigen::Vector4d LocalMapping::PlaneFitting(const vector<Eigen::Vector3d> &plane_pts, Eigen::Vector3d &center)
+{
+    center = Eigen::Vector3d::Zero();
+    for (const auto & pt : plane_pts) center += pt;
+    center /= plane_pts.size();
+
+    Eigen::MatrixXd A(plane_pts.size(), 3);
+    for (int i = 0; i < plane_pts.size(); i++) {
+        A(i, 0) = plane_pts[i][0] - center[0];
+        A(i, 1) = plane_pts[i][1] - center[1];
+        A(i, 2) = plane_pts[i][2] - center[2];
+    }
+
+    Eigen::JacobiSVD<Eigen::MatrixXd> svd(A, Eigen::ComputeThinV);
+    const float a = svd.matrixV()(0, 2);
+    const float b = svd.matrixV()(1, 2);
+    const float c = svd.matrixV()(2, 2);
+    const float d = -(a * center[0] + b * center[1] + c * center[2]);
+
+    return Eigen::Vector4d(a, b, c, d);
 }
 
 void LocalMapping::SearchInNeighbors()

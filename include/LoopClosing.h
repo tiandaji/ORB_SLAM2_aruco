@@ -31,7 +31,9 @@
 
 #include <thread>
 #include <mutex>
+#include <set>
 #include "Thirdparty/g2o/g2o/types/types_seven_dof_expmap.h"
+#include "MapAruco.h"
 
 namespace ORB_SLAM2
 {
@@ -81,6 +83,12 @@ public:
     bool isFinished();
 
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+//* Add by liujiamin
+public:
+
+    std::set<int> msiArucoAllID;
+    std::set<int> msiArucoTrackID;
 
 protected:
 

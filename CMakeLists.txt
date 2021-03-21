@@ -7,8 +7,8 @@ ENDIF()
 
 MESSAGE("Build type: " ${CMAKE_BUILD_TYPE})
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}  -Wall  -O3 -march=native ")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall   -O3 -march=native")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}  -Wall  -O3")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall   -O3")
 
 # Check C++11 or C++0x support
 include(CheckCXXCompilerFlag)
@@ -42,6 +42,7 @@ find_package(Pangolin REQUIRED)
 include_directories(
 ${PROJECT_SOURCE_DIR}
 ${PROJECT_SOURCE_DIR}/include
+${PROJECT_SOURCE_DIR}/g2oAddition
 ${EIGEN3_INCLUDE_DIR}
 ${Pangolin_INCLUDE_DIRS}
 )
@@ -69,6 +70,7 @@ src/Sim3Solver.cc
 src/Initializer.cc
 src/Viewer.cc
 src/MapAruco.cc
+g2oAddition/EdgeMarker.cpp
 )
 
 target_link_libraries(${PROJECT_NAME}
@@ -113,3 +115,6 @@ add_executable(mono_euroc
 Examples/Monocular/mono_euroc.cc)
 target_link_libraries(mono_euroc ${PROJECT_NAME})
 
+add_executable(mono_spm
+Examples/Monocular/mono_spm.cc)
+target_link_libraries(mono_spm ${PROJECT_NAME})

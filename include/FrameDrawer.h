@@ -24,6 +24,7 @@
 #include "Tracking.h"
 #include "MapPoint.h"
 #include "Map.h"
+#include "MapAruco.h"
 
 #include<opencv2/core/core.hpp>
 #include<opencv2/features2d/features2d.hpp>
@@ -62,6 +63,9 @@ protected:
     vector<cv::KeyPoint> mvIniKeys;
     vector<int> mvIniMatches;
     int mState;
+    //Add by liujiamin 
+    vector<aruco::Marker> mvCurrentArucos;
+    int NA;
 
     Map* mpMap;
 

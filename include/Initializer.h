@@ -41,6 +41,16 @@ public:
     // Selects a model and tries to recover the motion and the structure from motion
     bool Initialize(const Frame &CurrentFrame, const vector<int> &vMatches12,
                     cv::Mat &R21, cv::Mat &t21, vector<cv::Point3f> &vP3D, vector<bool> &vbTriangulated);
+    
+    // Use Aruco to INITIALIZE
+    bool InitializeUseAruco(const Frame &CurrentFrame, const vector<int> &vMatches12,
+                    vector<cv::Mat> &R21, vector<cv::Mat> &t21,
+                    vector<cv::Point3f> &vP3D, vector<bool> &vbTriangulated, int &bestIdA);
+    // bool InitializeUseAruco(const Frame &CurrentFrame, const vector<int> &vMatches12,
+    //                 const vector<cv::KeyPoint> &vk1, const vector<cv::KeyPoint> &vk2, const vector<Match> &vMA12,
+    //                 vector<cv::Mat> &R21, vector<cv::Mat> &t21,
+    //                 vector<cv::Point3f> &vP3D, vector<bool> &vbTriangulated, int &bestIdA,
+    //                 vector<cv::Point3f> &vP3DA,vector<bool> &vbTriAruco);
 
 
 private:

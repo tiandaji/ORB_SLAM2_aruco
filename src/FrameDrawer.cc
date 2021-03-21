@@ -41,6 +41,7 @@ cv::Mat FrameDrawer::DrawFrame()
     vector<cv::KeyPoint> vIniKeys; // Initialization: KeyPoints in reference frame
     vector<int> vMatches; // Initialization: correspondeces with reference keypoints
     vector<cv::KeyPoint> vCurrentKeys; // KeyPoints in current frame
+    vector<aruco::Marker> vCurrentArucos;
     vector<bool> vbVO, vbMap; // Tracked MapPoints in current frame
     int state; // Tracking state
 
@@ -56,18 +57,21 @@ cv::Mat FrameDrawer::DrawFrame()
         if(mState==Tracking::NOT_INITIALIZED)
         {
             vCurrentKeys = mvCurrentKeys;
+            vCurrentArucos = mvCurrentArucos;
             vIniKeys = mvIniKeys;
             vMatches = mvIniMatches;
         }
         else if(mState==Tracking::OK)
         {
             vCurrentKeys = mvCurrentKeys;
+            vCurrentArucos = mvCurrentArucos;
             vbVO = mvbVO;
             vbMap = mvbMap;
         }
         else if(mState==Tracking::LOST)
         {
             vCurrentKeys = mvCurrentKeys;
+            vCurrentArucos = mvCurrentArucos;
         }
     } // destroy scoped mutex -> release mutex
 
@@ -75,6 +79,7 @@ cv::Mat FrameDrawer::DrawFrame()
         cvtColor(im,im,CV_GRAY2BGR);
 
     //Draw
+    
     if(state==Tracking::NOT_INITIALIZED) //INITIALIZING
     {
         for(unsigned int i=0; i<vMatches.size(); i++)
@@ -84,7 +89,25 @@ cv::Mat FrameDrawer::DrawFrame()
                 cv::line(im,vIniKeys[i].pt,vCurrentKeys[vMatches[i]].pt,
                         cv::Scalar(0,255,0));
             }
-        }        
+        } 
+        int na = vCurrentArucos.size();
+    for(int i=0; i<na; i++)
+    {
+            cv::Point2f pt0,pt1,pt2,pt3;
+            pt0.x = vCurrentArucos[i][0].x;
+            pt0.y = vCurrentArucos[i][0].y;
+            pt1.x = vCurrentArucos[i][1].x;
+            pt1.y = vCurrentArucos[i][1].y;
+            pt2.x = vCurrentArucos[i][2].x;
+            pt2.y = vCurrentArucos[i][2].y;
+            pt3.x = vCurrentArucos[i][3].x;
+            pt3.y = vCurrentArucos[i][3].y;
+            cv::line(im,pt0,pt1,cv::Scalar(255,0,0));
+            cv::line(im,pt1,pt2,cv::Scalar(255,0,0));
+            cv::line(im,pt2,pt3,cv::Scalar(255,0,0));
+            cv::line(im,pt3,pt0,cv::Scalar(255,0,0));
+            
+    }       
     }
     else if(state==Tracking::OK) //TRACKING
     {
@@ -92,6 +115,7 @@ cv::Mat FrameDrawer::DrawFrame()
         mnTrackedVO=0;
         const float r = 5;
         const int n = vCurrentKeys.size();
+        
         for(int i=0;i<n;i++)
         {
             if(vbVO[i] || vbMap[i])
@@ -117,6 +141,25 @@ cv::Mat FrameDrawer::DrawFrame()
                 }
             }
         }
+        int na = vCurrentArucos.size();
+    for(int i=0; i<na; i++)
+    {
+            cv::Point2f pt0,pt1,pt2,pt3;
+            pt0.x = vCurrentArucos[i][0].x;
+            pt0.y = vCurrentArucos[i][0].y;
+            pt1.x = vCurrentArucos[i][1].x;
+            pt1.y = vCurrentArucos[i][1].y;
+            pt2.x = vCurrentArucos[i][2].x;
+            pt2.y = vCurrentArucos[i][2].y;
+            pt3.x = vCurrentArucos[i][3].x;
+            pt3.y = vCurrentArucos[i][3].y;
+            cv::line(im,pt0,pt1,cv::Scalar(255,0,0));
+            cv::line(im,pt1,pt2,cv::Scalar(255,0,0));
+            cv::line(im,pt2,pt3,cv::Scalar(255,0,0));
+            cv::line(im,pt3,pt0,cv::Scalar(255,0,0));
+            
+    }
+        
     }
 
     cv::Mat imWithInfo;
@@ -158,9 +201,12 @@ void FrameDrawer::DrawTextInfo(cv::Mat &im, int nState, cv::Mat &imText)
     cv::Size textSize = cv::getTextSize(s.str(),cv::FONT_HERSHEY_PLAIN,1,1,&baseline);
 
     imText = cv::Mat(im.rows+textSize.height+10,im.cols,im.type());
-    im.copyTo(imText.rowRange(0,im.rows).colRange(0,im.cols));
-    imText.rowRange(im.rows,imText.rows) = cv::Mat::zeros(textSize.height+10,im.cols,im.type());
-    cv::putText(imText,s.str(),cv::Point(5,imText.rows-5),cv::FONT_HERSHEY_PLAIN,1,cv::Scalar(255,255,255),1,8);
+    im.copyTo(imText.rowRange(textSize.height+10,im.rows+textSize.height+10).colRange(0,im.cols));
+    imText.rowRange(0,textSize.height+10) = cv::Mat::zeros(textSize.height+10,im.cols,im.type());
+    cv::putText(imText,s.str(),cv::Point(5,textSize.height+5),cv::FONT_HERSHEY_PLAIN,1,cv::Scalar(255,255,255),1,8);
+    // im.copyTo(imText.rowRange(0,im.rows).colRange(0,im.cols));
+    // imText.rowRange(im.rows,imText.rows) = cv::Mat::zeros(textSize.height+10,im.cols,im.type());
+    // cv::putText(imText,s.str(),cv::Point(5,imText.rows-5),cv::FONT_HERSHEY_PLAIN,1,cv::Scalar(255,255,255),1,8);
 
 }
 
@@ -169,7 +215,9 @@ void FrameDrawer::Update(Tracking *pTracker)
     unique_lock<mutex> lock(mMutex);
     pTracker->mImGray.copyTo(mIm);
     mvCurrentKeys=pTracker->mCurrentFrame.mvKeys;
+    mvCurrentArucos = pTracker->mCurrentFrame.mvMarkers;
     N = mvCurrentKeys.size();
+    NA = mvCurrentArucos.size();
     mvbVO = vector<bool>(N,false);
     mvbMap = vector<bool>(N,false);
     mbOnlyTracking = pTracker->mbOnlyTracking;

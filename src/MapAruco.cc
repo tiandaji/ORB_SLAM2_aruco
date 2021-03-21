@@ -13,16 +13,23 @@ mutex MapAruco::mGlobalMutex;
 MapAruco::MapAruco(const aruco::Marker& pM, KeyFrame* pRefKF, Map* pMap, double length):
 nObs(0), mbAddLocalBA(false)
 {
-    cout<<"It's in the constuction..."<<endl;
+    // cout<<"It's in the constuction..."<<endl;
     mAruco = pM; // 此mAruco会保存他在当前帧上的像素位置
     mLength = length;
+    cv::Mat rvec = mAruco.Rvec;
+    mRcm = cv::Mat::zeros(3,3,CV_32F);
+    cv::Rodrigues(rvec, mRcm);
+    mtcm = mAruco.Tvec;
+    isTwm = false;
+
+    mTwm = cv::Mat::eye(4,4,CV_32F);
 
     // TODO: Initial the position in the Tag Reference
-    // (s/2,-s/2,0), (s/2,s/2,0), (-s/2,s/2,0), (-s/2,-s/2,0)
-    cv::Mat c0=(cv::Mat_<float>(3,1)<< mLength/2, -mLength/2, 0);
-    cv::Mat c1=(cv::Mat_<float>(3,1)<< mLength/2,  mLength/2, 0);
-    cv::Mat c2=(cv::Mat_<float>(3,1)<<-mLength/2,  mLength/2, 0);
-    cv::Mat c3=(cv::Mat_<float>(3,1)<<-mLength/2, -mLength/2, 0);
+    // (-s/2,s/2,0), (s/2,s/2,0), (s/2,-s/2,0), (-s/2,-s/2,0)
+    cv::Mat c0=(cv::Mat_<float>(3,1)<<-mLength/2, mLength/2, 0);
+    cv::Mat c1=(cv::Mat_<float>(3,1)<< mLength/2, mLength/2, 0);
+    cv::Mat c2=(cv::Mat_<float>(3,1)<< mLength/2,-mLength/2, 0);
+    cv::Mat c3=(cv::Mat_<float>(3,1)<<-mLength/2,-mLength/2, 0);
     mvPosInTag.push_back(c0);
     mvPosInTag.push_back(c1);
     mvPosInTag.push_back(c2);
@@ -37,61 +44,95 @@ nObs(0), mbAddLocalBA(false)
     mnFirstKFid = pRefKF->mnId;
     mnFirstFrame = pRefKF->mnFrameId;
 
+    mvMapPoint = vector<MapPoint*>(4,static_cast<MapPoint*>(NULL));
 }
 
-void MapAruco::SetRtwm(const cv::Mat &Rwc, const cv::Mat &twc)
+std::vector<cv::Point3f> MapAruco::get3DPointsLocalRefSystem(float length)
 {
-    unique_lock<mutex> lock(mMutexFeatures);
-    cout<<"It's in the SetRTwm..."<<endl;
-    cv::Mat rvec = mAruco.Rvec;
-    cv::Mat Rcm = cv::Mat::zeros(3,3,CV_32F);
-    cv::Rodrigues(rvec, Rcm);
-    cout<<Rcm<<endl;
-    mRwm = Rwc * Rcm;
+    //这个顺序跟我在上面构造函数中的顺序不一致
+    return {cv::Point3f ( -length/2.,  length/2., 0 ),
+            cv::Point3f (  length/2.,  length/2., 0 ),
+            cv::Point3f (  length/2., -length/2., 0 ),
+            cv::Point3f ( -length/2., -length/2., 0 )  };
+}
 
-    cv::Mat tcm = mAruco.Tvec;
-    cout<<tcm<<endl;
-    mtwm = twc + tcm;
+// @param ini 
+void MapAruco::SetRtwm(const cv::Mat &Rwc, const cv::Mat &twc) // first time: Rwc, twc
+{
+    unique_lock<mutex> lock2(mGlobalMutex);
+    unique_lock<mutex> lock(mMutexPos);
+    // cout<<"It's in the SetRTwm..."<<endl;
 
-    mTwm = cv::Mat::eye(4,4,CV_32F);
+    if(!isTwm)
+    {
+        mRwm = Rwc * mRcm;
+        mtwm = Rwc*mtcm + twc;
+        isTwm = true;
+    }
+    else // 不是第一次赋值了，直接改变 marker->world
+    {
+        mRwm = Rwc;
+        mtwm = twc;
+    }
+    
     mRwm.copyTo( mTwm.rowRange(0,3).colRange(0,3) );
     mtwm.copyTo( mTwm.rowRange(0,3).col(3) );
 
     SetPosInWorld();
 }
 
+void MapAruco::SetRtwmByKeyFrame(const cv::Mat &Rwc, const cv::Mat &twc)
+{
+    unique_lock<mutex> lock2(mGlobalMutex);
+    unique_lock<mutex> lock(mMutexPos);
+    mRwm = Rwc * mRcm;
+    mtwm = twc + mtcm;
+}
+
 cv::Mat MapAruco::GetTwm()
 {
-    unique_lock<mutex> lock(mMutexFeatures);
+    unique_lock<mutex> lock(mMutexPos);
     return mTwm;
 }
 
 void MapAruco::SetPosInWorld()
 {
     // unique_lock<mutex> lock(mMutexFeatures);
-    cout<<"It's in the GetPosInWorld..."<<endl;
+    // cout<<"It's in the GetPosInWorld..."<<endl;
     mvPosInWorld.push_back(mRwm * mvPosInTag[0] + mtwm);
     mvPosInWorld.push_back(mRwm * mvPosInTag[1] + mtwm);
     mvPosInWorld.push_back(mRwm * mvPosInTag[2] + mtwm);
     mvPosInWorld.push_back(mRwm * mvPosInTag[3] + mtwm);
+
+    // cout<<"m1-m0="<<cv::norm(mvPosInWorld[1]-mvPosInWorld[0])<<endl;
+    // cout<<"m2-01="<<cv::norm(mvPosInWorld[2]-mvPosInWorld[1])<<endl;
+    // cout<<"m3-m2="<<cv::norm(mvPosInWorld[3]-mvPosInWorld[2])<<endl;
+    // cout<<"m0-m3="<<cv::norm(mvPosInWorld[0]-mvPosInWorld[3])<<endl;
+
 }
 
 cv::Mat MapAruco::GetPosInWorld(const size_t & idx)
 {
-    unique_lock<mutex> lock(mMutexFeatures);
+    unique_lock<mutex> lock(mMutexPos);
     return mvPosInWorld[idx];
 }
 
-void MapAruco::SetPosInWorld(const size_t & idx, const cv::Mat & p)
+MapPoint* MapAruco::GetMapPoint(const size_t & idx)
 {
-    unique_lock<mutex> lock(mMutexFeatures);
-    mvPosInWorld[idx] = p;
+    unique_lock<mutex> lock(mMutexPos);
+    return mvMapPoint[idx];
 }
+
+// void MapAruco::SetPosInWorld(const size_t & idx, const cv::Mat & p)
+// {
+//     unique_lock<mutex> lock(mMutexFeatures);
+//     mvPosInWorld[idx] = p;
+// }
 
 void MapAruco::AddObservation(KeyFrame* pKF,size_t idx)
 {
     unique_lock<mutex> lock(mMutexFeatures);
-    cout<<"It's in the AddObservation..."<<endl;
+    // cout<<"It's in the AddObservation..."<<endl;
     if(mObservations.count(pKF))
         return;
     mObservations[pKF]=idx;
@@ -107,6 +148,12 @@ int MapAruco::GetMapArucoID()
     return mAruco.id;
 }
 
+aruco::Marker MapAruco::GetAruco()
+{
+    unique_lock<mutex> lock(mMutexFeatures);
+    return mAruco;
+}
+
 int MapAruco::Observations()
 {
     unique_lock<mutex> lock(mMutexFeatures);
@@ -119,5 +166,22 @@ map<KeyFrame*, size_t> MapAruco::GetObservations()
     return mObservations;
 }
 
+double MapAruco::GetArucoLength()
+{
+    unique_lock<mutex> lock(mMutexFeatures);
+    return mLength;
+}
+
+void MapAruco::SetCorrelateMapPoint(size_t idx, MapPoint* pMP)
+{
+    unique_lock<mutex> lock(mMutexFeatures);
+    mvMapPoint[idx] = pMP;
+}
+
+long unsigned int MapAruco::GetFirstKFid()
+{
+    unique_lock<mutex> lock(mMutexFeatures);
+    return mnFirstKFid;
+}
 
 }

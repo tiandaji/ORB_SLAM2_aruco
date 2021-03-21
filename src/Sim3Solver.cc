@@ -287,7 +287,7 @@ void Sim3Solver::ComputeSim3(cv::Mat &P1, cv::Mat &P2)
 
     cv::Mat P3 = mR12i*Pr2;
 
-    // Step 6: Scale
+    //! Step 6: Scale
 
     if(!mbFixScale)
     {

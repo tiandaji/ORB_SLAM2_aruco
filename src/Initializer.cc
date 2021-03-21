@@ -120,6 +120,70 @@ bool Initializer::Initialize(const Frame &CurrentFrame, const vector<int> &vMatc
     return false;
 }
 
+// * Add by liujiamin
+bool Initializer::InitializeUseAruco(const Frame &CurrentFrame, const vector<int> &vMatches12,
+                    vector<cv::Mat> &R21, vector<cv::Mat> &t21,
+                    vector<cv::Point3f> &vP3D, vector<bool> &vbTriangulated, int &bestIdA)
+// bool Initializer::InitializeUseAruco(const Frame &CurrentFrame, const vector<int> &vMatches12,
+//                     const vector<cv::KeyPoint> &vk1, const vector<cv::KeyPoint> &vk2, const vector<Match> &vMA12,
+//                     vector<cv::Mat> &R21, vector<cv::Mat> &t21,
+//                     vector<cv::Point3f> &vP3D, vector<bool> &vbTriangulated, int &bestIdA,
+//                     vector<cv::Point3f> &vP3DA,vector<bool> &vbTriAruco)
+{
+    mvKeys2 = CurrentFrame.mvKeysUn;
+    mvMatches12.clear();
+    mvMatches12.reserve(mvKeys2.size());
+    mvbMatched1.resize(mvKeys1.size());
+    for(size_t i=0, iend=vMatches12.size();i<iend; i++)
+    {
+        if(vMatches12[i]>=0)
+        {
+            mvMatches12.push_back(make_pair(i,vMatches12[i]));
+            mvbMatched1[i]=true;
+        }
+        else
+            mvbMatched1[i]=false;
+    }
+    const int N = mvMatches12.size();
+    const int numPose = R21.size();
+    int bA=-1;
+    int bestGood = 0;
+    vector<bool> vbMatchesInliers(N, true);
+    // const int NA = vk1.size();
+    // vector<bool> vbMAI(NA, true);
+    for(int i=0; i<numPose; i++)
+    {
+        float parallaxi;
+        vector<cv::Point3f> vP3Di;
+        vector<cv::Point3f> vp3dia;
+        vector<bool> vbTriangulatedi;
+        vector<bool> vbTriangulatedA;
+        
+        double tn = cv::norm(t21[i]);
+        // cout<<"0.8*N="<<0.8*N<<"\t"<<tn<<";\ti = "<<i;
+        if(tn < 0.2){
+            // cout<<endl;
+            continue;
+        }
+        int nGood = CheckRT(R21[i], t21[i], mvKeys1, mvKeys2, mvMatches12, vbMatchesInliers, mK, vP3Di, 4.0*mSigma2, vbTriangulatedi, parallaxi);
+        // int nGood2 = CheckRT(R21[i], t21[i], vk1, vk2, vMA12, vbMAI, mK, vp3dia, 4.0*mSigma2, vbTriangulatedA, parallaxi);
+        // cout<<", nGood = "<<nGood<<endl;
+        
+        if(nGood>bestGood)
+        {
+            bestGood = nGood;
+            vP3D=vP3Di;
+            // vP3DA=vp3dia;
+            vbTriangulated=vbTriangulatedi;
+            // vbTriAruco=vbTriangulatedA;
+            bestIdA=i;
+        }
+    }
+    if(bestGood<0.8*N)
+        return false;
+        
+    return true;
+}
 
 void Initializer::FindHomography(vector<bool> &vbMatchesInliers, float &score, cv::Mat &H21)
 {

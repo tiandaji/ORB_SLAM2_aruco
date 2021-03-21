@@ -43,7 +43,7 @@ KeyFrame::KeyFrame(Frame &F, Map *pMap, KeyFrameDatabase *pKFDB):
     mpORBvocabulary(F.mpORBvocabulary), mbFirstConnection(true), mpParent(NULL), mbNotErase(false),
     mbToBeErased(false), mbBad(false), mHalfBaseline(F.mb/2), mpMap(pMap),
     mvpMapArucos(F.mvpMapArucos), mvuArucoRight(F.mvuArucoRight), NA(F.NA),
-    mvMarkers(F.mvMarkers)
+    mvMarkers(F.mvMarkers), mvpArucoMPs(F.mvpArucoMPs), mvArucoUn(F.mvArucoUn)
 {
     mnId=nNextId++;
 
@@ -222,6 +222,38 @@ void KeyFrame::AddMapAruco(MapAruco* pMA, const size_t &idx)
     cout<<"in KeyFrame::AddMapAruco(MapAruco* pMA, const size_t &idx)"<<endl;
     mvpMapArucos[idx]=pMA;
     cout<<"\t"<<mvpMapArucos[idx]->GetMapArucoID()<<endl;
+}
+
+void KeyFrame::AddArucoMapPoint(MapPoint *pAMP, const size_t &idx)
+{
+    unique_lock<mutex> lock(mMutexFeatures);
+    mvpArucoMPs[idx]=pAMP;
+}
+
+void KeyFrame::CorrelateMapArucoMapPoint()
+{
+    for(size_t i=0; i<NA; i++)
+    {
+        MapAruco* pMA = mvpMapArucos[i];
+        for(size_t t=0; t<4; t++)
+        {
+            aruco::Marker amarker = pMA->GetAruco();
+            double ptx,pty;
+            ptx = amarker[t].x;
+            pty = amarker[t].y;
+            std::vector<size_t> vsidx = GetFeaturesInArea(ptx, pty, 5);
+            int sizevidx = vsidx.size();
+            cout << pMA->GetMapArucoID() <<"\t"<<sizevidx<<endl;
+            if(sizevidx != 0)
+            {
+                size_t ssid = vsidx[sizevidx/2];
+                MapPoint* pMP = mvpMapPoints[ssid];
+                if(pMP)
+                    pMA->SetCorrelateMapPoint(t, pMP); 
+            }
+        }
+        
+    }
 }
 
 void KeyFrame::EraseMapPointMatch(const size_t &idx)
@@ -625,6 +657,65 @@ vector<size_t> KeyFrame::GetFeaturesInArea(const float &x, const float &y, const
 
                 if(fabs(distx)<r && fabs(disty)<r)
                     vIndices.push_back(vCell[j]);
+            }
+        }
+    }
+
+    return vIndices;
+}
+
+vector<size_t> KeyFrame::GetFeaturesInAruco(int numi)
+{
+    // 根据原理：如果一个点在这个凸四边形内，那么按照顺时针方向，该点一定在每条边的右侧。
+    vector<size_t> vIndices;
+    vIndices.reserve(N);
+    // step 1: 确定边界，要检索的格子范围
+    // cv::Point2d c0(mvMarkers[numi][0].x, mvMarkers[numi][0].y);
+    // cv::Point2d c1(mvMarkers[numi][1].x, mvMarkers[numi][1].y);
+    // cv::Point2d c2(mvMarkers[numi][2].x, mvMarkers[numi][2].y);
+    // cv::Point2d c3(mvMarkers[numi][3].x, mvMarkers[numi][3].y);
+    //! 都要改成去畸变之后的坐标
+    cv::Point2d c0(mvArucoUn[4*numi].x, mvArucoUn[4*numi].y);
+    cv::Point2d c1(mvArucoUn[4*numi+1].x, mvArucoUn[4*numi+1].y);
+    cv::Point2d c2(mvArucoUn[4*numi+2].x, mvArucoUn[4*numi+2].y);
+    cv::Point2d c3(mvArucoUn[4*numi+3].x, mvArucoUn[4*numi+3].y);
+    double dx[] = {c0.x, c1.x, c2.x, c3.x};
+    double dy[] = {c0.y, c1.y, c2.y, c3.y};
+    double mkminx, mkmaxx, mkminy, mkmaxy;
+    mkminx = *min_element(dx, dx+4);
+    mkmaxx = *max_element(dx, dx+4);
+    mkminy = *min_element(dy, dy+4);
+    mkmaxy = *max_element(dy, dy+4);
+    const int mincellx = max(0, (int)floor((mkminx-mnMinX)*mfGridElementWidthInv));
+    if(mincellx>=mnGridCols) 
+        return vIndices;
+
+    const int maxcellx = min((int)mnGridCols-1, (int)ceil((mkmaxx-mnMinX)*mfGridElementWidthInv));
+    if(maxcellx<0)           
+        return vIndices;
+
+    const int mincelly = max(0, (int)floor((mkminy-mnMinY)*mfGridElementHeightInv));
+    if(mincelly>=mnGridRows) 
+        return vIndices;
+        
+    const int maxcelly = min((int)mnGridRows-1, (int)ceil((mkmaxy-mnMinY)*mfGridElementHeightInv));
+    if(maxcelly<0)          
+        return vIndices;
+
+    // step 2: 在格子内检索特征点是否在二维码框内
+    for(int ix=mincellx; ix<=maxcellx; ix++) {
+        for(int iy = mincelly; iy<=maxcelly; iy++) {
+            const vector<size_t> vcell = mGrid[ix][iy];
+            for(size_t j=0; j<vcell.size(); j++) {
+                const cv::KeyPoint &kpUn = mvKeysUn[vcell[j]];
+                const float kux=kpUn.pt.x;
+                const float kuy=kpUn.pt.y;
+                double a = (dx[1]-dx[0])*(kuy-dy[0]) - (dy[1]-dy[0])*(kux-dx[0]);
+                double b = (dx[2]-dx[1])*(kuy-dy[1]) - (dy[2]-dy[1])*(kux-dx[1]);
+                double c = (dx[3]-dx[2])*(kuy-dy[2]) - (dy[3]-dy[2])*(kux-dx[2]);
+                double d = (dx[0]-dx[3])*(kuy-dy[3]) - (dy[0]-dy[3])*(kux-dx[3]);
+                if((a>0&&b>0&&c>0&&d>0) ||(a<0&&b<0&&c<0&&d<0) )
+                    vIndices.push_back(vcell[j]);
             }
         }
     }

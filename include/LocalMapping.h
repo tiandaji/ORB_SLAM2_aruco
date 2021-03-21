@@ -28,7 +28,7 @@
 #include "KeyFrameDatabase.h"
 
 #include <mutex>
-
+#include <Eigen/SVD>
 
 namespace ORB_SLAM2
 {
@@ -77,6 +77,9 @@ protected:
     bool CheckNewKeyFrames();
     void ProcessNewKeyFrame();
     void CreateNewMapPoints();
+    //* Add by liujiamin
+    void CreateArucoMapPoints();
+    Eigen::Vector4d PlaneFitting(const std::vector<Eigen::Vector3d> &plane_pts, Eigen::Vector3d &center);
 
     void MapPointCulling();
     void SearchInNeighbors();
