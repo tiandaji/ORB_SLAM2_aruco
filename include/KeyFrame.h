@@ -29,6 +29,7 @@
 #include "Frame.h"
 #include "KeyFrameDatabase.h"
 #include "MapAruco.h"
+#include "InitKeyFrame.h"
 
 #include <mutex>
 #include <opencv2/opencv.hpp>
@@ -43,11 +44,13 @@ class MapPoint;
 class Frame;
 class KeyFrameDatabase;
 class MapAruco;
+class InitKeyFrame;
 
 class KeyFrame
 {
 public:
     KeyFrame(Frame &F, Map* pMap, KeyFrameDatabase* pKFDB);
+    KeyFrame(InitKeyFrame &initkf, Map* pMap,KeyFrameDatabase* pKFDB, vector<MapPoint*>& vpMapPoints);
 
     // Pose functions
     void SetPose(const cv::Mat &Tcw);

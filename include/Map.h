@@ -25,6 +25,9 @@
 #include "KeyFrame.h"
 #include "MapAruco.h"
 #include <set>
+#include "Converter.h"
+#include "SystemSetting.h"
+#include "InitKeyFrame.h"
 
 #include <mutex>
 
@@ -36,6 +39,8 @@ namespace ORB_SLAM2
 class MapPoint;
 class KeyFrame;
 class MapAruco;
+class SystemSetting;
+class InitKeyFrame;
 
 class Map
 {
@@ -76,6 +81,10 @@ public:
     // This avoid that two points are created simultaneously in separate threads (id conflict)
     std::mutex mMutexPointCreation;
 
+    //* SAVE and LOAD map
+    void Save(const string &filename);
+    void Load(const string &filename, SystemSetting* mySystemSetting);
+
 protected:
     std::set<MapPoint*> mspMapPoints;
     std::set<KeyFrame*> mspKeyFrames;
@@ -93,6 +102,14 @@ protected:
     int mnBigChangeIdx;
 
     std::mutex mMutexMap;
+
+    //* 保存地图点和关键帧
+    void SaveMapPoint(ofstream &f, MapPoint* mp);
+    void SaveKeyFrame(ofstream &f, KeyFrame* kf);
+    std::map<MapPoint*, unsigned long int> mmpnMapPointsIdx;
+    void GetMapPointsIdx();
+    MapPoint* LoadMapPoint(ifstream &f);
+    KeyFrame* LoadKeyFrame(ifstream &f, SystemSetting* mySystemSetting);
 };
 
 } //namespace ORB_SLAM

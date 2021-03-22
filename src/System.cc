@@ -53,6 +53,7 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
         cout << "RGB-D" << endl;
 
     //Check settings file
+    mySettingFile = strSettingsFile;  //放在System::System里的check settings file 后面
     cv::FileStorage fsSettings(strSettingsFile.c_str(), cv::FileStorage::READ);
     if(!fsSettings.isOpened())
     {
@@ -495,6 +496,19 @@ vector<cv::KeyPoint> System::GetTrackedKeyPointsUn()
 void System::ComputeArucoInMap()
 {
     // usleep(1e5);
+}
+
+void System::SaveMap(const string &filename)
+{
+    mpMap->Save(filename);
+}
+
+void System::LoadMap(const string &filename)
+{
+    SystemSetting* mySystemSetting = new SystemSetting(mpVocabulary);
+     
+    mySystemSetting->LoadSystemSetting(mySettingFile);
+    mpMap->Load(filename,mySystemSetting);
 }
 
 } //namespace ORB_SLAM

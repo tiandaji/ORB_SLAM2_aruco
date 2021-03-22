@@ -71,6 +71,8 @@ src/Initializer.cc
 src/Viewer.cc
 src/MapAruco.cc
 g2oAddition/EdgeMarker.cpp
+src/SystemSetting.cc
+src/InitKeyFrame.cc
 )
 
 target_link_libraries(${PROJECT_NAME}

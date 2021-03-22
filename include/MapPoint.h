@@ -41,6 +41,7 @@ class MapPoint
 public:
     MapPoint(const cv::Mat &Pos, KeyFrame* pRefKF, Map* pMap);
     MapPoint(const cv::Mat &Pos,  Map* pMap, Frame* pFrame, const int &idxF);
+    MapPoint(const cv::Mat &Pos,Map* pMap); //* Add for LOAD map
 
     void SetWorldPos(const cv::Mat &Pos);
     cv::Mat GetWorldPos();
@@ -81,6 +82,8 @@ public:
     float GetMaxDistanceInvariance();
     int PredictScale(const float &currentDist, KeyFrame*pKF);
     int PredictScale(const float &currentDist, Frame* pF);
+
+    KeyFrame* SetReferenceKeyFrame(KeyFrame* RFKF); //* Add for LOAD map
 
 public:
     long unsigned int mnId;
